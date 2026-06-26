@@ -6,6 +6,135 @@ import type { LlmConfig } from "@/stores/wiki-store"
 // ── 仿真模式 ──
 export type SimulationMode = "event-driven" | "free-emergence" | "decision-tree" | "hybrid"
 
+// ── Agent 行为类型 ──
+export type AgentActionType =
+  | "evaluate"    // 角色评价/看法
+  | "pushPlot"    // 事态推动/主动行动
+  | "observe"     // 观察/感知
+  | "react"       // 对他人行为的反应
+  | "speak"       // 对话
+  | "ally"        // 结盟/合作
+  | "confront"    // 对抗
+  | "conceal"     // 隐瞒
+  | "investigate" // 调查
+  // 保留旧类型以兼容已有代码（新引擎不再产生）
+  | "act"
+  | "decide"
+  | "conflict"
+  | "cooperate"
+  | "withhold"
+
+export type ActionVisibility = "all" | "target_only" | "self"
+
+/**
+ * Agent 行为（扁平化结构，与 LLM 输出 JSON 对齐）
+ */
+export interface AgentAction {
+  type: AgentActionType
+  content: string
+  target?: string
+  /** 行为可见性：公开(all)/仅目标可见(target_only)/仅自己可见(self) */
+  visibility?: ActionVisibility
+  /** 行为动机 */
+  motivation?: string
+  /** 如何推动剧情 */
+  plot_push?: string
+}
+
+// ── 事件影响类型 ──
+export type EventImpactType = "sentiment" | "knowledge" | "relationship"
+
+export interface EventImpact {
+  characterId: string
+  type: EventImpactType
+  detail: string
+}
+
+// ── 时间线事件（新仿真引擎核心事件结构） ──
+export interface TimelineEvent {
+  id: string
+  round: number
+  nodeIndex: number
+  actorId: string
+  actorName: string
+  actionType: AgentActionType
+  content: string
+  targetId?: string
+  targetName?: string
+  /** 能观察到该事件的角色 ID 列表 */
+  observableBy: string[]
+  /** 事件对角色的影响 */
+  impacts: EventImpact[]
+  timestamp: string
+}
+
+// ── Agent 记忆 ──
+export interface AgentMemory {
+  /** 已观察到的事件 ID 列表 */
+  observedEvents: string[]
+  /** 已知秘密集合 */
+  knownSecrets: Set<string>
+  /** 对其他角色的情感值：key=角色ID, value=-100~100 */
+  sentiments: Map<string, number>
+  /** 最近决策记录 */
+  recentDecisions: string[]
+}
+
+// ── Agent ──
+export interface NovelAgent {
+  characterId: string
+  name: string
+  profile: string
+  aura: CharacterAura | null
+  cognition: { knows: string[]; doesNotKnow: string[] } | null
+  soul: string
+  currentGoal: string
+  emotionalState: string
+  /** @deprecated 使用 memory.sentiments 替代，保留以兼容旧代码 */
+  knownFacts: Set<string>
+  /** @deprecated 使用 memory.sentiments 替代，保留以兼容旧代码 */
+  relationships: Map<string, AgentRelation>
+  powerLevel: string
+  /** 新增：Agent 记忆 */
+  memory: AgentMemory
+  /** 新增：角色知道的信息范围 */
+  knowledgeScope: string[]
+  /** 新增：性格关键词数组 */
+  personality: string[]
+  /** 新增：说话风格描述 */
+  speakingStyle: string
+}
+
+export interface AgentRelation {
+  targetId: string
+  relationType: string
+  sentiment: number
+}
+
+// ── 仿真状态（新引擎核心状态） ──
+export interface SimulationState {
+  currentRound: number
+  timelineEvents: TimelineEvent[]
+  activeAgents: Map<string, NovelAgent>
+  worldState: Record<string, unknown>
+}
+
+// ── Agent 对话（采访/私聊） ──
+export interface AgentChatMessage {
+  id: string
+  role: "agent" | "user"
+  agentId?: string
+  agentName?: string
+  content: string
+  timestamp: string
+}
+
+export interface AgentChatSession {
+  agentId: string
+  agentName: string
+  messages: AgentChatMessage[]
+}
+
 // ── 提取结果 ──
 export interface ExtractionResult {
   characters: ExtractedCharacter[]
@@ -49,6 +178,8 @@ export interface ExtractedMemoryData {
 export interface StoryFramework {
   id: string
   title: string
+  /** 简短标题，不超过10字 */
+  shortTitle?: string
   premise: string
   targetWords: number
   simulationMode: SimulationMode
@@ -69,39 +200,7 @@ export interface StoryNode {
   expectedOutcome: string
 }
 
-// ── Agent ──
-export interface NovelAgent {
-  characterId: string
-  name: string
-  profile: string
-  aura: CharacterAura | null
-  cognition: { knows: string[]; doesNotKnow: string[] } | null
-  soul: string
-  currentGoal: string
-  emotionalState: string
-  knownFacts: Set<string>
-  relationships: Map<string, AgentRelation>
-  powerLevel: string
-}
-
-export interface AgentRelation {
-  targetId: string
-  relationType: string
-  sentiment: number
-}
-
-// ── Agent 行为 ──
-export type AgentAction =
-  | { type: "speak"; target?: string; content: string }
-  | { type: "act"; content: string }
-  | { type: "react"; target: string; content: string }
-  | { type: "decide"; content: string }
-  | { type: "investigate"; content: string }
-  | { type: "conflict"; target: string; content: string }
-  | { type: "cooperate"; target: string; content: string }
-  | { type: "withhold"; content: string }
-
-// ── 仿真事件 ──
+// ── 仿真事件（保留以兼容报告生成器和旧流程） ──
 export interface SimulationEvent {
   type: "agent-action" | "node-complete" | "node-start"
   agent?: NovelAgent
@@ -110,6 +209,8 @@ export interface SimulationEvent {
   node?: StoryNode
   stateChanges?: string[]
   timestamp: string
+  /** 关联的时间线事件（新引擎填充） */
+  timelineEvent?: TimelineEvent
 }
 
 // ── 推演报告 ──

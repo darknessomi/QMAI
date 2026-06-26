@@ -1,11 +1,13 @@
 import type { CharacterAura } from "@/lib/novel/character-aura"
 import type {
+  AgentMemory,
   AgentRelation,
   ExtractionResult,
   ExtractedCharacter,
   NovelAgent,
   StoryFramework,
   StoryNode,
+  TimelineEvent,
 } from "@/lib/novel/story-simulation/types"
 
 /**
@@ -28,11 +30,91 @@ function inferGoalFromFramework(
 }
 
 /**
+ * 从角色 soul 和 aura 中提取性格关键词。
+ * 简单策略：取 soul 文本的前若干关键词 + aura 中相关字段的关键短语。
+ */
+function extractPersonalityKeywords(
+  soul: string,
+  aura: CharacterAura | null,
+): string[] {
+  const keywords: string[] = []
+
+  // 从 soul 中提取简短关键词（按标点分割，取短句）
+  if (soul) {
+    const parts = soul
+      .split(/[。；，、\n,;.]/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && s.length <= 12)
+    for (const part of parts.slice(0, 5)) {
+      if (!keywords.includes(part)) {
+        keywords.push(part)
+      }
+    }
+  }
+
+  // 从 aura 关键字段提取
+  if (aura) {
+    const fields = [aura.styleDescription, aura.behaviorRules, aura.mentalModel]
+    for (const field of fields) {
+      if (!field) continue
+      const parts = field
+        .split(/[。；，、\n,;.]/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && s.length <= 10)
+      for (const part of parts.slice(0, 2)) {
+        if (!keywords.includes(part)) {
+          keywords.push(part)
+        }
+      }
+    }
+  }
+
+  return keywords.slice(0, 8)
+}
+
+/**
+ * 从 aura 的表达 DNA 和风格描述中提取说话风格。
+ */
+function extractSpeakingStyle(aura: CharacterAura | null, soul: string): string {
+  const parts: string[] = []
+  if (aura?.expressionDna) {
+    parts.push(aura.expressionDna.trim())
+  }
+  if (aura?.styleDescription) {
+    parts.push(aura.styleDescription.trim())
+  }
+  if (parts.length === 0 && soul) {
+    // 兜底：取 soul 的前 100 字作为风格参考
+    parts.push(soul.slice(0, 100))
+  }
+  return parts.join("；").slice(0, 300)
+}
+
+/**
+ * 初始化 Agent 记忆。
+ */
+function initMemory(
+  allCharacterIds: string[],
+  initialSentiments?: Map<string, number>,
+): AgentMemory {
+  const sentiments = new Map<string, number>()
+  for (const id of allCharacterIds) {
+    sentiments.set(id, initialSentiments?.get(id) ?? 0)
+  }
+  return {
+    observedEvents: [],
+    knownSecrets: new Set<string>(),
+    sentiments,
+    recentDecisions: [],
+  }
+}
+
+/**
  * 根据提取结果与故事框架构建仿真用 Agent 列表。
  *
  * - 从框架节点中收集所有涉及的角色名
  * - 如果框架未指定角色，则使用全部提取到的角色
- * - 为每个角色构建 NovelAgent，初始化目标、情绪、已知事实与关系
+ * - 为每个角色构建 NovelAgent，初始化目标、情绪、已知事实、关系、记忆、性格、说话风格、认知范围
  */
 export function buildAgents(
   extraction: ExtractionResult,
@@ -60,12 +142,12 @@ export function buildAgents(
   const allCharacterIds = selectedCharacters.map((c) => c.id)
 
   const agents: NovelAgent[] = selectedCharacters.map((character) => {
-    // 已知事实从认知的 knows 初始化
+    // 已知事实从认知的 knows 初始化（保留兼容）
     const knownFacts = new Set<string>(
       character.cognition?.knows ?? [],
     )
 
-    // 初始化与其他角色的关系：relationType="neutral", sentiment=0
+    // 初始化与其他角色的关系（保留兼容）
     const relationships = new Map<string, AgentRelation>()
     for (const otherId of allCharacterIds) {
       if (otherId === character.id) continue
@@ -75,6 +157,18 @@ export function buildAgents(
         sentiment: 0,
       })
     }
+
+    // 知识范围从 cognition.knows 构建
+    const knowledgeScope: string[] = [...(character.cognition?.knows ?? [])]
+
+    // 性格关键词
+    const personality = extractPersonalityKeywords(character.soul, character.aura)
+
+    // 说话风格
+    const speakingStyle = extractSpeakingStyle(character.aura, character.soul)
+
+    // 记忆初始化
+    const memory = initMemory(allCharacterIds)
 
     return {
       characterId: character.id,
@@ -88,6 +182,10 @@ export function buildAgents(
       knownFacts,
       relationships,
       powerLevel: "",
+      memory,
+      knowledgeScope,
+      personality,
+      speakingStyle,
     }
   })
 
@@ -95,16 +193,43 @@ export function buildAgents(
 }
 
 /**
+ * 从 SimulationState 中筛选某个 Agent 可见的时间线事件（最近 N 条）。
+ */
+export function getVisibleEvents(
+  agentId: string,
+  timelineEvents: TimelineEvent[],
+  limit = 10,
+): TimelineEvent[] {
+  return timelineEvents
+    .filter((e) => e.observableBy.includes(agentId))
+    .slice(-limit)
+}
+
+/**
+ * 格式化时间线事件为简短描述（供上下文拼接使用）。
+ */
+export function formatTimelineEvent(event: TimelineEvent): string {
+  const targetDesc = event.targetName ? ` → ${event.targetName}` : ""
+  const visibilityTag =
+    event.observableBy.length > 2
+      ? "[公开]"
+      : event.observableBy.length === 2
+        ? "[私聊]"
+        : "[内心]"
+  return `第${event.round + 1}轮 ${visibilityTag} ${event.actorName}${targetDesc} [${event.actionType}]：${event.content}`
+}
+
+/**
  * 构建 Agent 决策时的上下文文本。
  *
- * 包含当前场景、Agent 身份、认知边界、当前状态、人际关系、近期事件与世界规则。
- * CharacterAura 的字段以实际源码为准，不存在的字段会被跳过。
+ * 包含当前场景、Agent 身份（含性格与说话风格）、认知边界、记忆/情感、人际关系、可见时间线事件与世界规则。
  */
 export function buildAgentContext(
   agent: NovelAgent,
   node: StoryNode,
   recentEvents: string[],
   worldRules: string,
+  visibleTimelineEvents?: TimelineEvent[],
 ): string {
   const sections: string[] = []
 
@@ -133,6 +258,12 @@ export function buildAgentContext(
   if (agent.soul) {
     sections.push(`灵魂：${agent.soul}`)
   }
+  if (agent.personality.length > 0) {
+    sections.push(`性格关键词：${agent.personality.join("、")}`)
+  }
+  if (agent.speakingStyle) {
+    sections.push(`说话风格：${agent.speakingStyle}`)
+  }
 
   // 光环各字段（以实际源码为准，不存在的字段跳过）
   if (agent.aura) {
@@ -151,16 +282,15 @@ export function buildAgentContext(
   }
 
   // ── 认知边界 ──
-  if (agent.cognition) {
-    sections.push("")
-    sections.push("【认知边界】")
-    if (agent.cognition.knows.length > 0) {
-      sections.push(`已知：${agent.cognition.knows.join("；")}`)
-    }
-    if (agent.cognition.doesNotKnow.length > 0) {
-      sections.push(`未知：${agent.cognition.doesNotKnow.join("；")}`)
-    }
+  sections.push("")
+  sections.push("【认知边界】")
+  if (agent.knowledgeScope.length > 0) {
+    sections.push(`你知道的信息：${agent.knowledgeScope.join("；")}`)
   }
+  if (agent.cognition?.doesNotKnow && agent.cognition.doesNotKnow.length > 0) {
+    sections.push(`你不知道的信息：${agent.cognition.doesNotKnow.join("；")}`)
+  }
+  sections.push("【重要提醒】你只能基于你知道的信息行动，你不知道的事情绝对不能使用，绝不能表现出全知视角。")
 
   // ── 当前状态 ──
   sections.push("")
@@ -168,23 +298,32 @@ export function buildAgentContext(
   sections.push(`当前目标：${agent.currentGoal}`)
   sections.push(`情绪状态：${agent.emotionalState}`)
 
-  // ── 人际关系 ──
-  if (agent.relationships.size > 0) {
+  // ── 人际关系与情感（从 memory.sentiments 读取） ──
+  if (agent.memory.sentiments.size > 0) {
     sections.push("")
-    sections.push("【人际关系】")
-    for (const relation of agent.relationships.values()) {
-      sections.push(
-        `对 ${relation.targetId}：${relation.relationType}（情感值 ${relation.sentiment}）`,
-      )
+    sections.push("【你对其他角色的情感】")
+    for (const [otherId, value] of agent.memory.sentiments.entries()) {
+      if (otherId === agent.characterId) continue
+      // 尝试找到角色名
+      sections.push(`对角色[${otherId}]：好感度 ${value}`)
     }
   }
 
-  // ── 近期事件 ──
+  // ── 近期事件（旧接口字符串列表，保留兼容） ──
   if (recentEvents.length > 0) {
     sections.push("")
     sections.push("【近期事件】")
     for (const event of recentEvents) {
       sections.push(`- ${event}`)
+    }
+  }
+
+  // ── 你能观察到的时间线事件（新引擎） ──
+  if (visibleTimelineEvents && visibleTimelineEvents.length > 0) {
+    sections.push("")
+    sections.push("【你观察到的最近事件】")
+    for (const ev of visibleTimelineEvents) {
+      sections.push(`- ${formatTimelineEvent(ev)}`)
     }
   }
 
