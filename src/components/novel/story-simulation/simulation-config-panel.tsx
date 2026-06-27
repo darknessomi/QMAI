@@ -74,12 +74,11 @@ export function SimulationConfigPanel({ onStart }: SimulationConfigPanelProps) {
                 )}
               >
                 <div className="flex w-full items-center justify-between">
-                  <span className="text-lg">{info.icon}</span>
+                  <span className="text-sm font-medium">{info.name}</span>
                   <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium", info.color)}>
                     {info.freedomLabel}
                   </span>
                 </div>
-                <span className="text-sm font-medium">{info.name}</span>
                 <span className="text-xs leading-relaxed text-muted-foreground">{info.shortDesc}</span>
               </button>
             )
@@ -90,7 +89,6 @@ export function SimulationConfigPanel({ onStart }: SimulationConfigPanelProps) {
         {selectedModeInfo && (
           <div className="rounded-lg border bg-muted/30 p-4">
             <div className="mb-3 flex items-center gap-2">
-              <span className="text-xl">{selectedModeInfo.icon}</span>
               <span className="font-medium">{selectedModeInfo.name}模式</span>
               <span className={cn("ml-auto rounded-full px-2 py-0.5 text-xs", selectedModeInfo.color)}>
                 推荐

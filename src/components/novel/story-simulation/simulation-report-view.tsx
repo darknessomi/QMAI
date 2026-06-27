@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { useStorySimulationStore, type SavedSimulationResult } from "@/stores/story-simulation-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { exportReport } from "@/lib/novel/story-simulation/report-export"
+import { cn } from "@/lib/utils"
 import type { StoryBranch, TimelineEvent, StoryFramework, SimulationReport } from "@/lib/novel/story-simulation/types"
 
 const PROBABILITY_COLORS: Record<string, string> = {
@@ -67,9 +68,13 @@ interface ReportContentProps {
   onGenerateDraft?: (branch: StoryBranch) => void
   title?: string
   compact?: boolean
+  /** 对比模式下的另一个报告，用于高亮差异 */
+  compareReport?: SimulationReport | null
+  /** 对比模式下的另一组时间线事件，用于差异统计 */
+  compareTimelineEvents?: TimelineEvent[]
 }
 
-function ReportContent({ report, timelineEvents, framework, onInterviewAgent, onGenerateDraft, title, compact }: ReportContentProps) {
+function ReportContent({ report, timelineEvents, framework, onInterviewAgent, onGenerateDraft, title, compact, compareReport, compareTimelineEvents }: ReportContentProps) {
   // 构建名字到ID的映射
   const nameToId = useMemo(() => {
     const map = new Map<string, string>()
@@ -120,6 +125,87 @@ function ReportContent({ report, timelineEvents, framework, onInterviewAgent, on
     return { characters, edges }
   }, [timelineEvents])
 
+  // 对比模式：计算角色分析差异
+  const characterDiff = useMemo(() => {
+    if (!compareReport) return null
+    const aNames = new Set(report.characterAnalyses.map((c) => c.name))
+    const bNames = new Set(compareReport.characterAnalyses.map((c) => c.name))
+    const onlyInA = new Set([...aNames].filter((n) => !bNames.has(n)))
+    const onlyInB = new Set([...bNames].filter((n) => !aNames.has(n)))
+    const scoreDiff = new Map<string, { a: number; b: number }>()
+    for (const ca of report.characterAnalyses) {
+      const cb = compareReport.characterAnalyses.find((c) => c.name === ca.name)
+      if (cb && ca.consistencyScore !== cb.consistencyScore) {
+        scoreDiff.set(ca.name, { a: ca.consistencyScore, b: cb.consistencyScore })
+      }
+    }
+    return { onlyInA, onlyInB, scoreDiff }
+  }, [report.characterAnalyses, compareReport])
+
+  const getCharHighlightClass = (name: string): string => {
+    if (!characterDiff) return ""
+    if (characterDiff.onlyInA.has(name)) return "bg-green-100 dark:bg-green-950/40"
+    if (characterDiff.onlyInB.has(name)) return "bg-red-100 dark:bg-red-950/40"
+    if (characterDiff.scoreDiff.has(name)) return "bg-amber-100 dark:bg-amber-950/40"
+    return ""
+  }
+
+  // 对比模式：计算走向分支差异
+  const branchDiff = useMemo(() => {
+    if (!compareReport) return null
+    const aTitles = new Set(report.branches.map((b) => b.title))
+    const bTitles = new Set(compareReport.branches.map((b) => b.title))
+    const onlyInA = new Set([...aTitles].filter((t) => !bTitles.has(t)))
+    const onlyInB = new Set([...bTitles].filter((t) => !aTitles.has(t)))
+    const probDiff = new Map<string, { a: string; b: string }>()
+    for (const ba of report.branches) {
+      const bb = compareReport.branches.find((b) => b.title === ba.title)
+      if (bb && ba.probability !== bb.probability) {
+        probDiff.set(ba.title, { a: ba.probability, b: bb.probability })
+      }
+    }
+    return { onlyInA, onlyInB, probDiff }
+  }, [report.branches, compareReport])
+
+  const getBranchHighlightClass = (title: string): string => {
+    if (!branchDiff) return ""
+    if (branchDiff.onlyInA.has(title)) return "bg-green-100 dark:bg-green-950/40"
+    if (branchDiff.onlyInB.has(title)) return "bg-red-100 dark:bg-red-950/40"
+    if (branchDiff.probDiff.has(title)) return "bg-amber-100 dark:bg-amber-950/40"
+    return ""
+  }
+
+  // 对比模式：计算综合推荐差异（按句号分段）
+  const recommendationDiff = useMemo(() => {
+    if (!compareReport || !report.recommendation) return null
+    if (!compareReport.recommendation) return { segments: [{ text: report.recommendation, isDifferent: true }] }
+
+    const aSegments = report.recommendation.split(/[。！？]/).filter((s) => s.trim())
+    const bSegments = new Set(compareReport.recommendation.split(/[。！？]/).filter((s) => s.trim()))
+
+    return {
+      segments: aSegments.map((seg) => ({
+        text: seg,
+        isDifferent: !bSegments.has(seg),
+      })),
+    }
+  }, [report.recommendation, compareReport])
+
+  // 对比模式：计算时间线事件差异
+  const timelineDiff = useMemo(() => {
+    if (!compareReport || !compareTimelineEvents) return null
+    const aCount = timelineEvents.length
+    const bCount = compareTimelineEvents.length
+
+    const aActivity = new Map<string, number>()
+    for (const ev of timelineEvents) {
+      aActivity.set(ev.actorName, (aActivity.get(ev.actorName) || 0) + 1)
+    }
+    const aRanking = Array.from(aActivity.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5)
+
+    return { aCount, bCount, aRanking }
+  }, [timelineEvents, compareReport, compareTimelineEvents])
+
   return (
     <div className="flex h-full flex-col">
       {title && (
@@ -141,6 +227,17 @@ function ReportContent({ report, timelineEvents, framework, onInterviewAgent, on
           )}
 
           {/* 关键剧情事件时间线 */}
+          {timelineDiff && (
+            <div className="flex items-center gap-4 rounded-lg border bg-muted/30 px-3 py-2 text-xs">
+              <span className="font-medium">事件数量对比：</span>
+              <span className="text-primary">A: {timelineDiff.aCount}</span>
+              <span className="text-muted-foreground">vs</span>
+              <span className="text-red-500">B: {timelineDiff.bCount}</span>
+              <span className="ml-auto text-muted-foreground">
+                差异: {Math.abs(timelineDiff.aCount - timelineDiff.bCount)} 条
+              </span>
+            </div>
+          )}
           {timelineEvents.length > 0 && (
             <TimelineGroupedEvents
               events={timelineEvents}
@@ -182,11 +279,16 @@ function ReportContent({ report, timelineEvents, framework, onInterviewAgent, on
               </h3>
               <div className="space-y-3">
                 {report.characterAnalyses.map((char) => (
-                  <div key={char.characterId} className="rounded-lg border p-3">
+                  <div key={char.characterId} className={cn("rounded-lg border p-3", getCharHighlightClass(char.name))}>
                     <div className="flex items-center justify-between">
                       <span className="font-medium">{char.name}</span>
                       <span className="rounded px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
                         一致性: {char.consistencyScore}
+                        {characterDiff?.scoreDiff.has(char.name) && (
+                          <span className="ml-1 text-amber-600">
+                            (B: {characterDiff.scoreDiff.get(char.name)!.b})
+                          </span>
+                        )}
                       </span>
                     </div>
 
@@ -226,7 +328,7 @@ function ReportContent({ report, timelineEvents, framework, onInterviewAgent, on
               </h3>
               <div className="space-y-3">
                 {report.branches.map((branch, idx) => (
-                  <div key={idx} className="rounded-lg border p-3">
+                  <div key={idx} className={cn("rounded-lg border p-3", getBranchHighlightClass(branch.title))}>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium">{branch.title}</span>
                       {branch.recommendation && (
@@ -287,8 +389,24 @@ function ReportContent({ report, timelineEvents, framework, onInterviewAgent, on
                 <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
                   <Sparkles className="h-3.5 w-3.5" />
                   综合推荐
+                  {recommendationDiff && (
+                    <span className="ml-auto text-xs font-normal text-amber-600">有差异</span>
+                  )}
                 </h3>
-                <p className="text-sm leading-relaxed">{report.recommendation}</p>
+                {recommendationDiff ? (
+                  <div className="space-y-1 text-sm leading-relaxed">
+                    {recommendationDiff.segments.map((seg, i) => (
+                      <span
+                        key={i}
+                        className={seg.isDifferent ? "rounded bg-amber-100 px-1 dark:bg-amber-950/40" : ""}
+                      >
+                        {seg.text}。
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm leading-relaxed">{report.recommendation}</p>
+                )}
               </div>
             </section>
           )}
@@ -468,6 +586,8 @@ export function SimulationReportView({
               onGenerateDraft={!currentResult ? onGenerateDraft : undefined}
               title={currentResult ? `结果 A (${formatDate(currentResult.createdAt)})` : "结果 A (最新)"}
               compact={true}
+              compareReport={compareResult?.report}
+              compareTimelineEvents={compareResult?.timelineEvents || []}
             />
           </div>
           <div className="min-w-0 flex-1">

@@ -16,7 +16,7 @@ import { generateStoryDraft } from "@/lib/novel/story-simulation/story-draft-gen
 import { saveFramework, saveSimulationResult, loadSimulationResults } from "@/lib/novel/story-simulation/framework-store"
 import { resolveDefaultModel } from "@/lib/novel/model-resolver"
 import { interviewAgent } from "@/lib/novel/story-simulation/agent-interview"
-import { saveInterview } from "@/lib/novel/story-simulation/interview-store"
+import { saveInterview, loadInterviews } from "@/lib/novel/story-simulation/interview-store"
 import { exportInterview } from "@/lib/novel/story-simulation/interview-export"
 import { serializeSimulationState, deserializeSimulationSnapshot } from "@/lib/novel/story-simulation/simulation-serializer"
 import type {
@@ -197,6 +197,44 @@ export function StorySimulationView() {
       }
     }
   }, [selectedResultId, savedResults])
+
+  // 续聊模式：恢复 agents 和 simulationState 到 ref
+  useEffect(() => {
+    if (!continuingInterviewId || !projectPath) return
+
+    // 异步恢复 agents
+    const restoreAgents = async () => {
+      try {
+        // 先尝试从采访记录恢复
+        const interviews = await loadInterviews(projectPath)
+        const interview = interviews.find((i) => i.id === continuingInterviewId)
+
+        if (interview?.agentSnapshot) {
+          const { agents, state } = deserializeSimulationSnapshot(interview.agentSnapshot)
+          lastAgentsRef.current = agents
+          lastSimulationStateRef.current = state
+          return
+        }
+
+        // 若采访记录无快照，尝试从推演结果恢复
+        if (interview?.frameworkId) {
+          const results = await loadSimulationResults(projectPath, interview.frameworkId)
+          for (const r of results) {
+            if (r.agentSnapshot) {
+              const { agents, state } = deserializeSimulationSnapshot(r.agentSnapshot)
+              lastAgentsRef.current = agents
+              lastSimulationStateRef.current = state
+              return
+            }
+          }
+        }
+      } catch (err) {
+        console.error("恢复 agent 状态失败:", err)
+      }
+    }
+
+    restoreAgents()
+  }, [continuingInterviewId, projectPath])
 
   // ── 核心流程 ──
 
@@ -719,15 +757,17 @@ export function StorySimulationView() {
             cancelling={isCancelling}
           />
         ) : phase === "simulating" ? (
-          <SimulatingTimelinePanel
-            progress={progress}
-            label={progressLabel || progressTitle}
-            events={timelineEvents}
-            framework={currentFramework}
-            onInterviewAgent={(id, name) => handleInterviewAgent(id, name)}
-            onCancel={handleCancel}
-            cancelling={isCancelling}
-          />
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <SimulatingTimelinePanel
+              progress={progress}
+              label={progressLabel || progressTitle}
+              events={timelineEvents}
+              framework={currentFramework}
+              onInterviewAgent={(id, name) => handleInterviewAgent(id, name)}
+              onCancel={handleCancel}
+              cancelling={isCancelling}
+            />
+          </div>
         ) : phase === "framework-confirming" ? (
           <div className="flex-1 overflow-y-auto p-4">
             <FrameworkConfirmPanel
