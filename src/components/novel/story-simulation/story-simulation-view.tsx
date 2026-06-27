@@ -559,9 +559,13 @@ export function StorySimulationView() {
         agentName: activeChatAgent.name,
         messages: agentChatMessages,
       }
+      const agentSnapshot = lastSimulationStateRef.current && lastAgentsRef.current.length > 0
+        ? serializeSimulationState(lastSimulationStateRef.current, lastAgentsRef.current)
+        : undefined
       await saveInterview(projectPath, session, {
         frameworkId: currentFramework?.id,
         frameworkTitle: currentFramework?.title,
+        agentSnapshot,
       })
       setError(`采访对话已保存（${agentChatMessages.length}条消息）`)
       setTimeout(() => setError(null), 3000)

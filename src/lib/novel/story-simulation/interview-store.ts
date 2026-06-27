@@ -9,6 +9,7 @@ import { createDirectory, writeFileAtomic, listDirectory, deleteFile, readFile }
 import { normalizePath } from "@/lib/path-utils"
 import type { FileNode } from "@/types/wiki"
 import type { AgentChatSession } from "./types"
+import type { SerializedSimulationSnapshot } from "./simulation-serializer"
 
 const INTERVIEWS_DIR = ".qmai/simulations/interviews"
 
@@ -28,6 +29,8 @@ export interface SavedInterview {
   createdAt: string
   updatedAt: string
   session: AgentChatSession
+  /** 推演时的 agent 快照，用于继续对话时恢复角色状态 */
+  agentSnapshot?: SerializedSimulationSnapshot
 }
 
 /**
@@ -41,6 +44,7 @@ export async function saveInterview(
     frameworkId?: string
     frameworkTitle?: string
     existingId?: string
+    agentSnapshot?: SerializedSimulationSnapshot
   },
 ): Promise<string> {
   const dir = interviewsDir(projectPath)
@@ -56,6 +60,7 @@ export async function saveInterview(
     createdAt: now,
     updatedAt: now,
     session,
+    agentSnapshot: options?.agentSnapshot,
   }
 
   // 如果已存在，保留原始 createdAt
