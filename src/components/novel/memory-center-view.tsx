@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   AlertTriangle,
@@ -6,6 +6,7 @@ import {
   Pencil,
   RefreshCw,
   Save,
+  Search,
   Trash2,
   X,
 } from "lucide-react"
@@ -85,7 +86,9 @@ function SnapshotCard({
   onDelete: (chapterNumber: number, title: string) => void
   t: (key: string, opts?: Record<string, unknown>) => string
 }) {
-  const title = card.chapterTitle || t("novel.memoryCenter.snapshots.chapter", { chapter: card.chapterNumber })
+  const title = card.chapterNumber < 0
+    ? (card.chapterTitle || `大纲快照(${card.chapterNumber})`)
+    : (card.chapterTitle || t("novel.memoryCenter.snapshots.chapter", { chapter: card.chapterNumber }))
   return (
     <div className="rounded-md border p-3">
       <div className="flex items-center justify-between gap-3">
@@ -518,20 +521,81 @@ function MemoryCenterDetailPanel({
   onDeleteMarkdown: () => void
   t: (key: string, opts?: Record<string, unknown>) => string
 }) {
+  const [rangeStart, setRangeStart] = useState("")
+  const [rangeEnd, setRangeEnd] = useState("")
+
   if (detailView.kind === "snapshotList") {
+    const chapterCards = detailView.cards.filter((c) => c.chapterNumber > 0)
+    const maxChapter = chapterCards.length > 0 ? chapterCards[0].chapterNumber : 0
+
+    const filteredCards = useMemo(() => {
+      const start = rangeStart.trim() ? Number(rangeStart.trim()) : 0
+      const end = rangeEnd.trim() ? Number(rangeEnd.trim()) : 0
+      if (start > 0 && end > 0 && start <= end) {
+        return detailView.cards.filter((c) => c.chapterNumber >= start && c.chapterNumber <= end)
+      }
+      if (start > 0) {
+        return detailView.cards.filter((c) => c.chapterNumber >= start)
+      }
+      if (end > 0) {
+        return detailView.cards.filter((c) => c.chapterNumber <= end)
+      }
+      return detailView.cards
+    }, [detailView.cards, rangeStart, rangeEnd])
+
     return (
       <div className="space-y-3">
-        {detailView.cards.map((card) => (
-          <SnapshotCard
-            key={card.chapterNumber}
-            card={card}
-            buttonId={`memory-center-detail-snapshot-${card.chapterNumber}`}
-            onOpen={onOpenSnapshot}
-            onEdit={onEditSnapshot}
-            onDelete={onDeleteSnapshot}
-            t={t}
+        <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            type="number"
+            min={1}
+            max={maxChapter}
+            placeholder="起始章"
+            value={rangeStart}
+            onChange={(e) => setRangeStart(e.target.value)}
+            className="h-7 w-20 rounded border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
-        ))}
+          <span className="text-xs text-muted-foreground">—</span>
+          <input
+            type="number"
+            min={1}
+            max={maxChapter}
+            placeholder="结束章"
+            value={rangeEnd}
+            onChange={(e) => setRangeEnd(e.target.value)}
+            className="h-7 w-20 rounded border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          {(rangeStart || rangeEnd) ? (
+            <button
+              type="button"
+              onClick={() => { setRangeStart(""); setRangeEnd("") }}
+              className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          <span className="ml-auto text-xs text-muted-foreground">
+            {filteredCards.length !== detailView.cards.length
+              ? `${filteredCards.length}/${detailView.cards.length}`
+              : `共${detailView.cards.length}条`}
+          </span>
+        </div>
+        {filteredCards.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">该区间内暂无章节快照</p>
+        ) : (
+          filteredCards.map((card) => (
+            <SnapshotCard
+              key={card.chapterNumber}
+              card={card}
+              buttonId={`memory-center-detail-snapshot-${card.chapterNumber}`}
+              onOpen={onOpenSnapshot}
+              onEdit={onEditSnapshot}
+              onDelete={onDeleteSnapshot}
+              t={t}
+            />
+          ))
+        )}
       </div>
     )
   }

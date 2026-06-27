@@ -209,8 +209,13 @@ export function buildMemoryCenterSnapshotCards(
   limit = 6,
   maxItemsPerList = 3,
 ): MemoryCenterSnapshotCard[] {
-  return [...snapshots]
-    .sort((left, right) => right.chapterNumber - left.chapterNumber)
+  // 分离章节快照（正数）和大纲快照（负数），章节快照降序排列在前
+  const chapterSnapshots = snapshots.filter((s) => s.chapterNumber > 0)
+  const outlineSnapshots = snapshots.filter((s) => s.chapterNumber < 0)
+  chapterSnapshots.sort((a, b) => b.chapterNumber - a.chapterNumber)
+  outlineSnapshots.sort((a, b) => b.chapterNumber - a.chapterNumber)
+  const sorted = [...chapterSnapshots, ...outlineSnapshots]
+  return sorted
     .slice(0, limit)
     .map((snapshot) => {
       const characterStateChanges = trimList(snapshot.characterStateChanges, maxItemsPerList)
