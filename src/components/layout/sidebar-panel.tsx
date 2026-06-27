@@ -27,7 +27,7 @@ import { FrameworkList } from "@/components/novel/story-simulation/framework-lis
 
 import { useWikiStore } from "@/stores/wiki-store"
 import { useStorySimulationStore } from "@/stores/story-simulation-store"
-import { loadFrameworks, loadSimulationResults } from "@/lib/novel/story-simulation/framework-store"
+import { loadFrameworks, loadSimulationResults, deleteSimulationResult } from "@/lib/novel/story-simulation/framework-store"
 import { loadBinding } from "@/lib/novel/story-simulation/framework-binding"
 import type { StoryFramework } from "@/lib/novel/story-simulation/types"
 import { createDirectory, fileExists, listDirectory, preprocessFile, readFile, writeFile } from "@/commands/fs"
@@ -349,12 +349,16 @@ function StorySimulationSidebarPanel() {
   const setBinding = useStorySimulationStore((s) => s.setBinding)
   const setCurrentFramework = useStorySimulationStore((s) => s.setCurrentFramework)
   const setCurrentReport = useStorySimulationStore((s) => s.setCurrentReport)
+  const setCurrentDraft = useStorySimulationStore((s) => s.setCurrentDraft)
+  const setTimelineEvents = useStorySimulationStore((s) => s.setTimelineEvents)
   const setPhase = useStorySimulationStore((s) => s.setPhase)
   const setSavedResults = useStorySimulationStore((s) => s.setSavedResults)
   const setSelectedResultId = useStorySimulationStore((s) => s.setSelectedResultId)
   const currentFramework = useStorySimulationStore((s) => s.currentFramework)
   const savedResults = useStorySimulationStore((s) => s.savedResults)
+  const selectedResultId = useStorySimulationStore((s) => s.selectedResultId)
   const reset = useStorySimulationStore((s) => s.reset)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   // 加载指定框架的历史推演结果
   const loadResultsForFramework = useCallback(async (frameworkId: string) => {
@@ -365,6 +369,8 @@ function StorySimulationSidebarPanel() {
         id: r.id,
         frameworkId,
         report: r.report,
+        draft: r.draft,
+        timelineEvents: r.timelineEvents,
         createdAt: r.report.createdAt,
       })))
     } catch {
@@ -406,6 +412,8 @@ function StorySimulationSidebarPanel() {
   const handleSelectFramework = (framework: StoryFramework) => {
     setCurrentFramework(framework)
     setCurrentReport(null)
+    setCurrentDraft(null)
+    setTimelineEvents([])
     setSelectedResultId(null)
     setPhase("framework-confirming")
   }
@@ -414,8 +422,35 @@ function StorySimulationSidebarPanel() {
     const result = savedResults.find(r => r.id === resultId)
     if (result) {
       setCurrentReport(result.report)
+      setCurrentDraft(result.draft || null)
+      setTimelineEvents(result.timelineEvents || [])
       setSelectedResultId(resultId)
       setPhase("report-viewing")
+    }
+  }
+
+  const handleDeleteResult = async (e: { stopPropagation: () => void }, resultId: string) => {
+    e.stopPropagation() // 防止触发选择
+    if (!projectPath || !currentFramework) return
+    if (!confirm("确定要删除这个推演结果吗？此操作不可撤销。")) return
+
+    setDeletingId(resultId)
+    try {
+      await deleteSimulationResult(projectPath, currentFramework.id, resultId)
+      // 刷新列表
+      await loadResultsForFramework(currentFramework.id)
+      // 如果删除的是当前选中的结果，清空
+      if (selectedResultId === resultId) {
+        setCurrentReport(null)
+        setCurrentDraft(null)
+        setTimelineEvents([])
+        setSelectedResultId(null)
+        setPhase("framework-confirming")
+      }
+    } catch {
+      // 删除失败忽略
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -455,24 +490,43 @@ function StorySimulationSidebarPanel() {
           </div>
           <div className="max-h-48 overflow-y-auto px-2 pb-2">
             {savedResults.map((result) => (
-              <button
+              <div
                 key={result.id}
-                type="button"
+                className={`group flex items-center gap-1 rounded px-2 py-1.5 text-xs transition-colors cursor-pointer hover:bg-accent ${
+                  selectedResultId === result.id ? "bg-accent" : ""
+                }`}
                 onClick={() => handleSelectResult(result.id)}
-                className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
               >
-                <span className="truncate text-foreground">
-                  {new Date(result.createdAt).toLocaleString("zh-CN", {
-                    month: "2-digit",
-                    day: "2-digit",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-                <span className="truncate text-[11px] text-muted-foreground">
-                  {result.report.recommendation?.slice(0, 30) || "查看推演结果"}...
-                </span>
-              </button>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate text-foreground">
+                      {new Date(result.createdAt).toLocaleString("zh-CN", {
+                        month: "2-digit",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    {result.draft && (
+                      <span className="shrink-0 rounded bg-primary/10 px-1 text-[10px] text-primary">
+                        草稿
+                      </span>
+                    )}
+                  </div>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {result.report.recommendation?.slice(0, 25) || "查看推演结果"}...
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                  onClick={(e) => void handleDeleteResult(e, result.id)}
+                  disabled={deletingId === result.id}
+                  title="删除此结果"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
             ))}
           </div>
         </div>

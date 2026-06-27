@@ -14,6 +14,8 @@ export interface SavedSimulationResult {
   id: string
   frameworkId: string
   report: SimulationReport
+  draft?: StoryDraft | null
+  timelineEvents?: TimelineEvent[]
   createdAt: string
 }
 

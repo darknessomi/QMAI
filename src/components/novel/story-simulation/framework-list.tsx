@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react"
-import { Link2, Trash2 } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { Link2, Search, Trash2 } from "lucide-react"
 
 import { useWikiStore } from "@/stores/wiki-store"
 import {
@@ -47,6 +47,19 @@ export function FrameworkList({
   const [dialogFramework, setDialogFramework] =
     useState<StoryFramework | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+
+  // 过滤框架
+  const filteredFrameworks = useMemo(() => {
+    if (!searchQuery.trim()) return frameworks
+    const q = searchQuery.toLowerCase().trim()
+    return frameworks.filter(
+      (fw) =>
+        fw.title.toLowerCase().includes(q) ||
+        (fw.shortTitle && fw.shortTitle.toLowerCase().includes(q)) ||
+        fw.premise.toLowerCase().includes(q),
+    )
+  }, [frameworks, searchQuery])
 
   useEffect(() => {
     if (!projectPath) {
@@ -117,70 +130,93 @@ export function FrameworkList({
           </Button>
         </div>
       ) : (
-        <div className="flex-1 space-y-1 overflow-y-auto p-2">
-          {frameworks.map((framework) => {
-            const isBound = binding?.frameworkId === framework.id
-            const isSelected = currentFrameworkId === framework.id
-            return (
-              <div
-                key={framework.id}
-                className={`group flex w-full items-center gap-1 rounded-md border px-2 py-1.5 text-left transition ${
-                  isSelected
-                    ? "border-primary bg-primary/10"
-                    : "bg-background hover:bg-muted"
-                }`}
-              >
-                <button
-                  type="button"
-                  className="flex min-w-0 flex-1 flex-col items-start"
-                  onClick={() => onSelectFramework(framework)}
-                >
-                  <span
-                    className="w-full truncate text-sm font-medium"
-                    title={framework.title}
-                  >
-                    {displayTitle(framework)}
-                  </span>
-                  <span className="mt-0.5 text-[11px] text-muted-foreground">
-                    {framework.nodes.length} 节点 · {framework.targetWords} 字
-                    {isBound ? " · 已绑定" : ""}
-                  </span>
-                </button>
-                <div className="flex shrink-0 items-center opacity-60 group-hover:opacity-100">
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7"
-                    title={isBound ? "管理绑定" : "绑定到 AI 会话"}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setDialogFramework(framework)
-                    }}
-                  >
-                    <Link2
-                      className={`h-3.5 w-3.5 ${isBound ? "text-primary" : ""}`}
-                    />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                    title="删除框架"
-                    disabled={deletingId === framework.id}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      void handleDelete(framework)
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+        <>
+          {/* 搜索框 */}
+          {frameworks.length > 3 && (
+            <div className="shrink-0 px-2 pt-2">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="搜索框架..."
+                  className="h-7 w-full rounded-md border border-input bg-background pl-7 pr-2 text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/50"
+                />
               </div>
-            )
-          })}
-        </div>
+            </div>
+          )}
+          <div className="flex-1 space-y-1 overflow-y-auto p-2">
+            {filteredFrameworks.length === 0 ? (
+              <div className="py-4 text-center text-xs text-muted-foreground">
+                无匹配框架
+              </div>
+            ) : (
+              filteredFrameworks.map((framework) => {
+                const isBound = binding?.frameworkId === framework.id
+                const isSelected = currentFrameworkId === framework.id
+                return (
+                  <div
+                    key={framework.id}
+                    className={`group flex w-full items-center gap-1 rounded-md border px-2 py-1.5 text-left transition ${
+                      isSelected
+                        ? "border-primary bg-primary/10"
+                        : "bg-background hover:bg-muted"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 flex-col items-start"
+                      onClick={() => onSelectFramework(framework)}
+                    >
+                      <span
+                        className="w-full truncate text-sm font-medium"
+                        title={framework.title}
+                      >
+                        {displayTitle(framework)}
+                      </span>
+                      <span className="mt-0.5 text-[11px] text-muted-foreground">
+                        {framework.nodes.length} 节点 · {framework.targetWords} 字
+                        {isBound ? " · 已绑定" : ""}
+                      </span>
+                    </button>
+                    <div className="flex shrink-0 items-center opacity-60 group-hover:opacity-100">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        title={isBound ? "管理绑定" : "绑定到 AI 会话"}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setDialogFramework(framework)
+                        }}
+                      >
+                        <Link2
+                          className={`h-3.5 w-3.5 ${isBound ? "text-primary" : ""}`}
+                        />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        title="删除框架"
+                        disabled={deletingId === framework.id}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void handleDelete(framework)
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </>
       )}
 
       {dialogFramework && (

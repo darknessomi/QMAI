@@ -22,6 +22,7 @@ import type {
   StoryDraft,
   StoryFramework,
   StoryNode,
+  TimelineEvent,
 } from "./types"
 
 const SIM_ROOT = ".qmai/simulations"
@@ -400,13 +401,18 @@ export async function saveSimulationResult(
   frameworkId: string,
   report: SimulationReport,
   draft?: StoryDraft,
+  timelineEvents?: TimelineEvent[],
 ): Promise<string> {
   await ensureSimulationDirs(projectPath)
   const resultId = `result-${Date.now()}`
   const dir = frameworkResultsDir(projectPath, frameworkId)
   await createDirectory(dir)
 
-  const payload = { report, draft: draft ?? null }
+  const payload = {
+    report,
+    draft: draft ?? null,
+    timelineEvents: timelineEvents ?? [],
+  }
   await writeFileAtomic(`${dir}/${resultId}.json`, JSON.stringify(payload, null, 2))
   await writeFileAtomic(
     `${dir}/${resultId}.md`,
@@ -415,11 +421,35 @@ export async function saveSimulationResult(
   return resultId
 }
 
+/** 删除指定的推演结果。 */
+export async function deleteSimulationResult(
+  projectPath: string,
+  frameworkId: string,
+  resultId: string,
+): Promise<void> {
+  const dir = frameworkResultsDir(projectPath, frameworkId)
+  try {
+    await deleteFile(`${dir}/${resultId}.json`)
+  } catch {
+    // 文件可能不存在
+  }
+  try {
+    await deleteFile(`${dir}/${resultId}.md`)
+  } catch {
+    // 文件可能不存在
+  }
+}
+
 /** 加载框架的所有推演结果，按 report.createdAt 降序排列。 */
 export async function loadSimulationResults(
   projectPath: string,
   frameworkId: string,
-): Promise<{ id: string; report: SimulationReport }[]> {
+): Promise<{
+  id: string
+  report: SimulationReport
+  draft?: StoryDraft | null
+  timelineEvents?: TimelineEvent[]
+}[]> {
   const dir = frameworkResultsDir(projectPath, frameworkId)
   let entries: FileNode[]
   try {
@@ -428,7 +458,12 @@ export async function loadSimulationResults(
     return []
   }
 
-  const results: { id: string; report: SimulationReport }[] = []
+  const results: {
+    id: string
+    report: SimulationReport
+    draft?: StoryDraft | null
+    timelineEvents?: TimelineEvent[]
+  }[] = []
   for (const entry of entries) {
     if (entry.is_dir) continue
     if (!entry.name.toLowerCase().endsWith(".json")) continue
@@ -436,12 +471,15 @@ export async function loadSimulationResults(
       const content = await readFile(entry.path)
       const parsed = JSON.parse(content) as {
         report: SimulationReport
-        draft?: StoryDraft
+        draft?: StoryDraft | null
+        timelineEvents?: TimelineEvent[]
       }
       if (parsed && parsed.report) {
         results.push({
           id: entry.name.replace(/\.json$/i, ""),
           report: parsed.report,
+          draft: parsed.draft ?? null,
+          timelineEvents: parsed.timelineEvents ?? [],
         })
       }
     } catch {

@@ -291,15 +291,23 @@ export function StorySimulationView() {
       setCurrentReport(report)
       setPhase("report-viewing")
 
-      // 自动保存推演结果
+      // 自动保存推演结果（包含时间线事件）
       try {
-        await saveSimulationResult(projectPath, currentFramework.id, report)
+        await saveSimulationResult(
+          projectPath,
+          currentFramework.id,
+          report,
+          undefined,
+          timelineEvents,
+        )
         // 刷新历史结果列表
         const results = await loadSimulationResults(projectPath, currentFramework.id)
         setSavedResults(results.map(r => ({
           id: r.id,
           frameworkId: currentFramework.id,
           report: r.report,
+          draft: r.draft,
+          timelineEvents: r.timelineEvents,
           createdAt: r.report.createdAt,
         })))
       } catch (saveErr) {
@@ -325,8 +333,8 @@ export function StorySimulationView() {
 
   /** 选择走向分支并生成故事草稿。 */
   const handleGenerateDraft = async (branch: StoryBranch) => {
-    if (!currentFramework || !currentReport) {
-      setError("缺少故事框架或推演报告")
+    if (!projectPath || !currentFramework || !currentReport) {
+      setError("缺少项目路径、故事框架或推演报告")
       return
     }
     setError(null)
@@ -345,6 +353,29 @@ export function StorySimulationView() {
       })
       setCurrentDraft(draft)
       setPhase("draft-viewing")
+
+      // 更新保存的推演结果，添加草稿
+      try {
+        await saveSimulationResult(
+          projectPath,
+          currentFramework.id,
+          currentReport,
+          draft,
+          timelineEvents,
+        )
+        // 刷新历史结果列表
+        const results = await loadSimulationResults(projectPath, currentFramework.id)
+        setSavedResults(results.map(r => ({
+          id: r.id,
+          frameworkId: currentFramework.id,
+          report: r.report,
+          draft: r.draft,
+          timelineEvents: r.timelineEvents,
+          createdAt: r.report.createdAt,
+        })))
+      } catch (saveErr) {
+        console.error("更新推演结果草稿失败:", saveErr)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setPhase("report-viewing")
