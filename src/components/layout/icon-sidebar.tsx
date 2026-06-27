@@ -1,5 +1,5 @@
 import {
-  FileText, FolderOpen, Search, Network, Brain, Settings, ArrowLeftRight, Sun, Moon, Monitor, Trash2, Sparkles, LayoutDashboard, BookOpen,
+  FileText, FolderOpen, Search, Network, Brain, Settings, ArrowLeftRight, Sun, Moon, Monitor, Trash2, Sparkles, LayoutDashboard, BookOpen, Drama,
 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -26,6 +26,7 @@ const NAV_ITEMS: { view: NavView; icon: typeof FileText; labelKey: string }[] = 
   { view: "soul", icon: Sparkles, labelKey: "novel.nav.soul" },
   { view: "bookAnalysis", icon: BookOpen, labelKey: "novel.nav.dismantling" },
   { view: "reviewCenter", icon: LayoutDashboard, labelKey: "novel.nav.reviewCenter" },
+  { view: "storySimulation", icon: Drama, labelKey: "novel.nav.storySimulation" },
 ]
 
 interface IconSidebarProps {

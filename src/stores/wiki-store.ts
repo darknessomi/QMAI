@@ -480,7 +480,7 @@ interface WikiState {
   chatExpanded: boolean
   chatDockPosition: ChatDockPosition
   searchPanelOpen: boolean
-  activeView: "wiki" | "sources" | "search" | "graph" | "lint" | "soul" | "dismantling" | "bookAnalysis" | "settings" | "trash" | "reviewCenter"
+  activeView: "wiki" | "sources" | "search" | "graph" | "lint" | "soul" | "dismantling" | "bookAnalysis" | "settings" | "trash" | "reviewCenter" | "storySimulation"
   activeSettingsCategory: SettingsCategoryId | null
   selectedSoulId: string | null
   selectedSoulTab: "project" | "character"
@@ -530,6 +530,7 @@ interface WikiState {
   theme: "light" | "dark" | "deep-blue" | "system"
   uiFontSizeScale: number
   dataVersion: number
+  bindingVersion: number
 
   setProject: (project: WikiProject | null) => void
   setFileTree: (tree: FileNode[]) => void
@@ -591,6 +592,7 @@ interface WikiState {
   setTheme: (theme: "light" | "dark" | "deep-blue" | "system") => void
   setUiFontSizeScale: (scale: number) => void
   bumpDataVersion: () => void
+  bumpBindingVersion: () => void
 }
 
 export const useWikiStore = create<WikiState>((set) => ({
@@ -643,6 +645,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   activePresetId: null,
 
   dataVersion: 0,
+  bindingVersion: 0,
 
   setProject: (project) => set({ project }),
   setFileTree: (fileTree) => set({ fileTree }),
@@ -793,6 +796,7 @@ export const useWikiStore = create<WikiState>((set) => ({
     set({ uiFontSizeScale: clamped })
   },
   bumpDataVersion: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
+  bumpBindingVersion: () => set((state) => ({ bindingVersion: state.bindingVersion + 1 })),
 }))
 
 export type { WikiState, LlmConfig, SearchApiConfig, EmbeddingConfig, MultimodalConfig, OutputLanguage, ProxyConfig, ScheduledImportConfig, SourceWatchConfig }
