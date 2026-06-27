@@ -1,5 +1,4 @@
 import type { LlmConfig, ProviderConfigs } from "@/stores/wiki-store"
-import { LLM_PRESETS } from "@/components/settings/llm-presets"
 
 export type LlmProvider = LlmConfig["provider"]
 
@@ -42,9 +41,9 @@ function isPresetEnabled(providerConfigs: ProviderConfigs, presetId: string): bo
 }
 
 function hasEnabledCustomPreset(providerConfigs: ProviderConfigs): boolean {
-  for (const preset of LLM_PRESETS) {
-    if (preset.provider !== "custom") continue
-    if (isPresetEnabled(providerConfigs, preset.id)) return true
+  for (const key of Object.keys(providerConfigs)) {
+    if (!key.startsWith("custom-")) continue
+    if (isPresetEnabled(providerConfigs, key)) return true
   }
   return false
 }

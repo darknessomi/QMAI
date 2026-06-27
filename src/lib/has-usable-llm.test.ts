@@ -72,4 +72,18 @@ describe("hasUsableLlm", () => {
     const cfg: LlmConfig = { ...baseCfg, provider: "custom", apiKey: "sk-test", model: "qwen-plus", customEndpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1" }
     expect(hasUsableLlm(cfg, providers)).toBe(true)
   })
+
+  it("rejects custom without apiKey when no custom-xxx preset is enabled", () => {
+    const providers: ProviderConfigs = {}
+    const cfg: LlmConfig = { ...baseCfg, provider: "custom", apiKey: "", model: "qwen-plus", customEndpoint: "http://localhost:1234/v1" }
+    expect(hasUsableLlm(cfg, providers)).toBe(false)
+  })
+
+  it("accepts custom without apiKey when a custom-xxx preset is explicitly enabled", () => {
+    const providers: ProviderConfigs = {
+      "custom-123456": { enabled: true, model: "qwen2.5-7b", baseUrl: "http://localhost:1234/v1", apiKey: "" },
+    }
+    const cfg: LlmConfig = { ...baseCfg, provider: "custom", apiKey: "", model: "qwen2.5-7b", customEndpoint: "http://localhost:1234/v1" }
+    expect(hasUsableLlm(cfg, providers)).toBe(true)
+  })
 })
