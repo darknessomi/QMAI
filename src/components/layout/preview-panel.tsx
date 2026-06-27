@@ -622,8 +622,9 @@ export function PreviewPanel() {
       setFileContent(syncResult.markdown)
 
       if (novelConfig.autoIngestOnSave) {
-        const llmConfig = useWikiStore.getState().llmConfig
-        if (!hasUsableLlm(llmConfig)) {
+        const state = useWikiStore.getState()
+        const llmConfig = state.llmConfig
+        if (!hasUsableLlm(llmConfig, state.providerConfigs)) {
           updatePhase(false, "ingest_no_llm")
         } else {
           const verifyContent = await readFile(targetPath)
@@ -752,8 +753,9 @@ export function PreviewPanel() {
   const handleDeAiProcess = useCallback(async () => {
     if (!fileContent.trim()) return
     setDeAiProcessing(true)
-    const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
-    if (!hasUsableLlm(llmConfig)) {
+    const state = useWikiStore.getState()
+    const llmConfig = resolveDefaultModel(state.llmConfig)
+    if (!hasUsableLlm(llmConfig, state.providerConfigs)) {
       setDeAiProcessing(false)
       return
     }
@@ -816,8 +818,9 @@ export function PreviewPanel() {
 
   const handleSelectionAction = useCallback(async (action: ChapterSelectionAction, selection: ChapterBodySelection) => {
     if (!selection.text.trim()) return
-    const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
-    if (!hasUsableLlm(llmConfig)) {
+    const state = useWikiStore.getState()
+    const llmConfig = resolveDefaultModel(state.llmConfig)
+    if (!hasUsableLlm(llmConfig, state.providerConfigs)) {
       setSaveStatus("未配置可用的 AI 模型，无法处理选中文本")
       return
     }

@@ -269,7 +269,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
     if (activeConv?.modelId) {
       effectiveLlmConfig = resolveModelConfig(activeConv.modelId, effectiveLlmConfig, providerConfigs)
     }
-    if (!hasUsableLlm(effectiveLlmConfig)) {
+    if (!hasUsableLlm(effectiveLlmConfig, providerConfigs)) {
       const convId = activeConversationId ?? createConversation()
       addMessage(convId, { id: crypto.randomUUID(), role: "assistant", content: "请先在设置中配置可用的AI模型（API Key 和模型名称），或在AI会话中选择一个模型。" })
       return
@@ -432,7 +432,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
     if (activeConv?.modelId) {
       effectiveLlmConfig = resolveModelConfig(activeConv.modelId, effectiveLlmConfig, providerConfigs)
     }
-    if (!hasUsableLlm(effectiveLlmConfig)) {
+    if (!hasUsableLlm(effectiveLlmConfig, providerConfigs)) {
       addMessage(activeConversationId, { id: crypto.randomUUID(), role: "assistant", content: "请先在设置中配置可用的AI模型（API Key 和模型名称），或在AI会话中选择一个模型。" })
       return
     }

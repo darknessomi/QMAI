@@ -445,7 +445,7 @@ export async function verifyFactCheckLlm(
       useWikiStore.getState().novelConfig,
       "review",
     )
-    if (!hasUsableLlm(llmConfig)) return results
+    if (!hasUsableLlm(llmConfig, useWikiStore.getState().providerConfigs)) return results
 
     const pendingItems = pendingResults.slice(0, 5)
     const itemsText = pendingItems.map((item, index) => {

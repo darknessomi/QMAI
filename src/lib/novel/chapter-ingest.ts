@@ -300,14 +300,14 @@ export async function ingestChapter(
   signal?: AbortSignal,
 ): Promise<IngestResult> {
   const pp = normalizePath(projectPath)
-  const novelMode = useWikiStore.getState().novelMode
-  if (!novelMode) return { snapshot: null }
+  const state = useWikiStore.getState()
+  if (!state.novelMode) return { snapshot: null }
 
-  const llmConfig = useWikiStore.getState().llmConfig
-  const novelConfig = useWikiStore.getState().novelConfig
+  const llmConfig = state.llmConfig
+  const novelConfig = state.novelConfig
   // 使用 resolveNovelModel 正确解析提取模型（含供应商配置切换）
   const runtimeLlmConfig = resolveNovelModel(llmConfig, novelConfig, "extract")
-  if (!hasUsableLlm(runtimeLlmConfig)) return { snapshot: null, failReason: "no_llm" }
+  if (!hasUsableLlm(runtimeLlmConfig, state.providerConfigs)) return { snapshot: null, failReason: "no_llm" }
 
   const content = await readFile(chapterPath)
   const parsed = parseFrontmatter(content)
@@ -1396,11 +1396,12 @@ export async function ingestOutline(
   signal?: AbortSignal,
 ): Promise<ChapterSnapshot | null> {
   const pp = normalizePath(projectPath)
-  const llmConfig = useWikiStore.getState().llmConfig
-  const novelConfig = useWikiStore.getState().novelConfig
+  const state = useWikiStore.getState()
+  const llmConfig = state.llmConfig
+  const novelConfig = state.novelConfig
   // 使用 resolveNovelModel 正确解析提取模型（含供应商配置切换），与 ingestChapter 保持一致
   const runtimeLlmConfig = resolveNovelModel(llmConfig, novelConfig, "extract")
-  if (!hasUsableLlm(runtimeLlmConfig)) return null
+  if (!hasUsableLlm(runtimeLlmConfig, state.providerConfigs)) return null
 
   const content = await readFile(outlinePath)
   const body = content.length > 8000 ? content.slice(0, 8000) : content

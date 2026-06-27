@@ -989,8 +989,9 @@ async function buildAuraResearchStage(
   input: CustomCharacterAuraGenerationInput,
   previousResearchFiles: Partial<Record<CharacterAuraResearchFileName, string>>,
 ): Promise<string> {
-  const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
-  if (hasUsableLlm(llmConfig)) {
+  const state = useWikiStore.getState()
+  const llmConfig = resolveDefaultModel(state.llmConfig)
+  if (hasUsableLlm(llmConfig, state.providerConfigs)) {
     try {
       const raw = await runAuraModelPrompt(
         "你是一名小说角色灵魂研究工作流助手。必须只输出用户要求的 Markdown 正文，不要输出解释，不要输出代码围栏。",
@@ -1008,8 +1009,9 @@ async function synthesizeCustomAuraFields(
   input: CustomCharacterAuraGenerationInput,
   researchFiles: Partial<Record<CharacterAuraResearchFileName, string>>,
 ): Promise<CustomAuraGeneratedFields> {
-  const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
-  if (hasUsableLlm(llmConfig)) {
+  const state = useWikiStore.getState()
+  const llmConfig = resolveDefaultModel(state.llmConfig)
+  if (hasUsableLlm(llmConfig, state.providerConfigs)) {
     try {
       const raw = await runAuraModelPrompt(
         "你是一名小说角色灵魂总结助手。只输出 JSON，不要解释，不要代码围栏。",
