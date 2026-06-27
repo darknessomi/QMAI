@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react"
 import { useTranslation } from "react-i18next"
-import { ArrowLeft, Check, Copy, Download, FileText, BookOpen } from "lucide-react"
+import { ArrowLeft, Check, Copy, Download, FileText, BookOpen, Pencil, Save } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import type { StoryDraft } from "@/lib/novel/story-simulation/types"
 import {
   Dialog,
   DialogContent,
@@ -27,6 +29,7 @@ export function StoryDraftView({ onBack }: StoryDraftViewProps) {
   const projectPath = useWikiStore((s) => s.project?.path)
   const currentFramework = useStorySimulationStore((s) => s.currentFramework)
   const draft = useStorySimulationStore((s) => s.currentDraft)
+  const setCurrentDraft = useStorySimulationStore((s) => s.setCurrentDraft)
   const setError = useStorySimulationStore((s) => s.setError)
   const setActiveView = useWikiStore((s) => s.setActiveView)
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
@@ -45,6 +48,9 @@ export function StoryDraftView({ onBack }: StoryDraftViewProps) {
   const [autoStartChapter, setAutoStartChapter] = useState(true)
   const [selectedIndices, setSelectedIndices] = useState<number[]>([])
   const [importProgress, setImportProgress] = useState<{ current: number; total: number; title: string } | null>(null)
+  const [editingChapterIdx, setEditingChapterIdx] = useState<number | null>(null)
+  const [editContent, setEditContent] = useState("")
+  const [editTitle, setEditTitle] = useState("")
 
   // 打开对话框时自动计算下一个章节号，并默认全选
   useEffect(() => {
@@ -168,6 +174,32 @@ export function StoryDraftView({ onBack }: StoryDraftViewProps) {
     }
   }
 
+  const openEditDialog = (idx: number) => {
+    if (!draft) return
+    const chapter = draft.chapters[idx]
+    setEditTitle(chapter.title)
+    setEditContent(chapter.content)
+    setEditingChapterIdx(idx)
+  }
+
+  const saveEdit = () => {
+    if (editingChapterIdx === null || !draft) return
+    const updatedDraft: StoryDraft = {
+      ...draft,
+      chapters: draft.chapters.map((ch, i) =>
+        i === editingChapterIdx
+          ? { ...ch, title: editTitle.trim() || ch.title, content: editContent }
+          : ch,
+      ),
+    }
+    setCurrentDraft(updatedDraft)
+    setEditingChapterIdx(null)
+  }
+
+  const cancelEdit = () => {
+    setEditingChapterIdx(null)
+  }
+
   const allSelected = draft && selectedIndices.length === draft.chapters.length
 
   return (
@@ -220,10 +252,24 @@ export function StoryDraftView({ onBack }: StoryDraftViewProps) {
               <h3 className="mb-2 flex items-center gap-2 font-medium">
                 <FileText className="h-4 w-4 text-muted-foreground" />
                 {chapter.title}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-7 w-7 p-0 opacity-50 hover:opacity-100"
+                  onClick={() => openEditDialog(idx)}
+                  title="编辑章节"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
               </h3>
               <p className="whitespace-pre-wrap text-sm leading-relaxed">
                 {chapter.content}
               </p>
+              {chapter.rawContent && chapter.rawContent !== chapter.content && (
+                <div className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
+                  ✓ 已编辑（原始内容已备份）
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -408,6 +454,53 @@ export function StoryDraftView({ onBack }: StoryDraftViewProps) {
                 </Button>
               </>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 编辑章节对话框 */}
+      <Dialog open={editingChapterIdx !== null} onOpenChange={(open) => {
+        if (!open) cancelEdit()
+      }}>
+        <DialogContent className="max-h-[90vh] max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>编辑章节</DialogTitle>
+            <DialogDescription>
+              编辑后的内容将用于导入到章节库。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">章节标题</label>
+              <Input
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="text-xs font-medium text-muted-foreground">章节内容</label>
+                <span className="text-xs text-muted-foreground">
+                  {editContent.length} 字
+                </span>
+              </div>
+              <Textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                className="min-h-[50vh] text-sm leading-relaxed"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={cancelEdit}>
+              放弃
+            </Button>
+            <Button onClick={saveEdit}>
+              <Save className="mr-1 h-3.5 w-3.5" />
+              保存修改
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

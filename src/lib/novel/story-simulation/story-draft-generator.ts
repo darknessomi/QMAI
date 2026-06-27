@@ -161,6 +161,7 @@ export async function generateStoryDraft(options: DraftGenerationOptions): Promi
       title: node.title,
       content: trimmed,
       correspondingNode: node.index,
+      rawContent: trimmed,
     }
 
     chapters.push(chapter)
