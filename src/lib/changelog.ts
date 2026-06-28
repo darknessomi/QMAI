@@ -78,6 +78,20 @@ const TWO_POINT_TWO_ELEVEN_CHANGELOG: ChangelogEntry = {
   },
 }
 
+const TWO_POINT_TWO_TWENTY_SIX_CHANGELOG: ChangelogEntry = {
+  version: "2.2.26",
+  date: "2026-06-28",
+  highlights: {
+    en: [],
+    zh: [
+      "修复模型选择器下拉框定位问题：下拉框不再显示在半空中，改为始终优先显示在按钮正下方；只有下方空间不足 120px 且上方空间充足时才自动翻转到上方。",
+      "下拉框高度根据可用空间动态计算（120px-400px），不再固定 400px。",
+      "提升下拉框层级，避免被对话框遮罩层遮挡。",
+      "新增下拉框细滚动条样式，与项目整体风格统一。",
+    ],
+  },
+}
+
 const TWO_POINT_TWO_TWENTY_FIVE_CHANGELOG: ChangelogEntry = {
   version: "2.2.25",
   date: "2026-06-28",
@@ -624,6 +638,7 @@ export const CHANGELOG: ChangelogEntry[] = [
 ]
 
 export function currentVersionChangelog(version: string): ChangelogEntry[] {
+  if (version === TWO_POINT_TWO_TWENTY_SIX_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_SIX_CHANGELOG]
   if (version === TWO_POINT_TWO_TWENTY_FIVE_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_FIVE_CHANGELOG]
   if (version === TWO_POINT_TWO_TWENTY_FOUR_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_FOUR_CHANGELOG]
   if (version === TWO_POINT_TWO_TWENTY_THREE_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_THREE_CHANGELOG]
@@ -654,6 +669,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    TWO_POINT_TWO_TWENTY_SIX_CHANGELOG,
     TWO_POINT_TWO_TWENTY_FIVE_CHANGELOG,
     TWO_POINT_TWO_TWENTY_FOUR_CHANGELOG,
     TWO_POINT_TWO_TWENTY_THREE_CHANGELOG,
