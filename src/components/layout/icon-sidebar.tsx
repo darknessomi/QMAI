@@ -135,10 +135,16 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
                     {pendingCount > 99 ? "99+" : pendingCount}
                   </span>
                 )}
+                {view === "storySimulation" && (
+                  <span className="absolute -right-1 -top-0.5 flex h-3.5 items-center justify-center rounded bg-amber-500 px-1 text-[9px] font-bold leading-none text-white">
+                    BETA
+                  </span>
+                )}
               </TooltipTrigger>
               <TooltipContent side="right">
                 {t(labelKey)}
                 {view === "reviewCenter" && pendingCount > 0 && ` (${pendingCount})`}
+                {view === "storySimulation" && " (测试版)"}
               </TooltipContent>
             </Tooltip>
           ))}
