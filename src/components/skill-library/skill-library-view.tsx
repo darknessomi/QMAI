@@ -135,14 +135,14 @@ export function SkillLibraryView() {
 
   return (
     <div data-testid="skill-library-view" className="flex h-full flex-col overflow-hidden">
-      <div className="border-b px-5 py-4">
-        <h1 className="text-lg font-semibold">技能库</h1>
-        <p className="mt-1 text-sm text-muted-foreground">管理当前项目可用的去AI味技能。</p>
+      <div className="shrink-0 border-b px-3 py-2">
+        <h1 className="text-sm font-semibold">技能库</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">管理当前项目可用的去AI味技能。</p>
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="flex w-72 shrink-0 flex-col border-r">
-          <div className="flex items-center justify-between border-b px-3 py-3">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <section className="border-b">
+          <div className="flex items-center justify-between px-3 py-2">
             <div className="text-sm font-medium">去AI味技能</div>
             <button
               type="button"
@@ -157,7 +157,7 @@ export function SkillLibraryView() {
             </button>
           </div>
 
-          <div data-testid="skill-list" className="min-h-0 flex-1 overflow-y-auto p-2">
+          <div data-testid="skill-list" className="max-h-[42vh] overflow-y-auto px-2 pb-2">
             {allSkills.map((skill) => {
               const active = skill.id === selectedSkill?.id
               const enabled = !disabledSkillIds.has(skill.id)
@@ -201,24 +201,24 @@ export function SkillLibraryView() {
               )
             })}
           </div>
-        </aside>
+        </section>
 
-        <main className="min-w-0 flex-1 overflow-y-auto p-5">
+        <main className="min-w-0 p-3">
           {!selectedSkill ? (
             <div className="text-sm text-muted-foreground">暂无技能。</div>
           ) : (
-            <div className="mx-auto flex max-w-4xl flex-col gap-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm text-muted-foreground">{sourceLabel(selectedSkill)}技能</div>
-                  <h2 className="text-xl font-semibold">{selectedSkill.name}</h2>
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
+                <div className="min-w-0">
+                  <div className="text-xs text-muted-foreground">{sourceLabel(selectedSkill)}技能</div>
+                  <h2 className="truncate text-base font-semibold">{selectedSkill.name}</h2>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     data-testid="skill-copy-button"
                     type="button"
                     onClick={() => void handleCopySkill()}
-                    className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
+                    className="rounded-md border px-2 py-1.5 text-xs hover:bg-accent"
                     disabled={saving}
                   >
                     复制为项目技能
@@ -227,7 +227,7 @@ export function SkillLibraryView() {
                     data-testid="skill-default-button"
                     type="button"
                     onClick={() => void handleSetDefault()}
-                    className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
+                    className="rounded-md border px-2 py-1.5 text-xs hover:bg-accent"
                     disabled={saving || config?.defaultSkillId === selectedSkill.id}
                   >
                     设为默认
@@ -237,7 +237,7 @@ export function SkillLibraryView() {
                       data-testid="skill-delete-button"
                       type="button"
                       onClick={() => void handleDeleteSkill()}
-                      className="rounded-md border px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10"
+                      className="rounded-md border px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10"
                       disabled={saving}
                     >
                       删除
@@ -246,50 +246,50 @@ export function SkillLibraryView() {
                 </div>
               </div>
 
-              <label className="grid gap-1.5 text-sm">
+              <label className="grid gap-1.5 text-xs">
                 <span className="font-medium">技能名称</span>
                 <input
                   data-testid="skill-name-input"
                   value={draftName}
                   onChange={(event) => setDraftName(event.target.value)}
                   disabled={!selectedIsEditable}
-                  className="rounded-md border bg-background px-3 py-2 outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
+                  className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
                 />
               </label>
 
-              <label className="grid gap-1.5 text-sm">
+              <label className="grid gap-1.5 text-xs">
                 <span className="font-medium">说明</span>
                 <input
                   data-testid="skill-description-input"
                   value={draftDescription}
                   onChange={(event) => setDraftDescription(event.target.value)}
                   disabled={!selectedIsEditable}
-                  className="rounded-md border bg-background px-3 py-2 outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
+                  className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
                 />
               </label>
 
-              <label className="grid gap-1.5 text-sm">
+              <label className="grid gap-1.5 text-xs">
                 <span className="font-medium">规则正文</span>
                 <textarea
                   data-testid="skill-content-input"
                   value={draftContent}
                   onChange={(event) => setDraftContent(event.target.value)}
                   disabled={!selectedIsEditable}
-                  className="min-h-[420px] rounded-md border bg-background px-3 py-2 font-mono text-xs leading-5 outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
+                  className="min-h-[280px] rounded-md border bg-background px-2 py-2 font-mono text-xs leading-5 outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
                 />
               </label>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   data-testid="skill-save-button"
                   type="button"
                   onClick={() => void handleSaveSkill()}
                   disabled={!selectedIsEditable || saving}
-                  className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving ? "保存中..." : "保存"}
                 </button>
-                {message ? <span className="text-sm text-muted-foreground">{message}</span> : null}
+                {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
               </div>
             </div>
           )}
