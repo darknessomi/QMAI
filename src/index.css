@@ -55,7 +55,7 @@
     --card-foreground: oklch(0.145 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
+    --primary: oklch(0.62 0.11 185);
     --primary-foreground: oklch(0.985 0 0);
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
@@ -67,11 +67,11 @@
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    --chart-1: oklch(0.72 0.11 185);
+    --chart-2: oklch(0.6 0.1 190);
+    --chart-3: oklch(0.5 0.08 195);
+    --chart-4: oklch(0.45 0.05 200);
+    --chart-5: oklch(0.4 0.02 210);
     --radius: 0.625rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
@@ -90,8 +90,8 @@
     --card-foreground: oklch(0.985 0 0);
     --popover: oklch(0.205 0 0);
     --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
+    --primary: oklch(0.72 0.1 185);
+    --primary-foreground: oklch(0.145 0 0);
     --secondary: oklch(0.269 0 0);
     --secondary-foreground: oklch(0.985 0 0);
     --muted: oklch(0.269 0 0);
@@ -102,11 +102,11 @@
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    --chart-1: oklch(0.78 0.12 185);
+    --chart-2: oklch(0.66 0.1 190);
+    --chart-3: oklch(0.56 0.09 195);
+    --chart-4: oklch(0.5 0.07 200);
+    --chart-5: oklch(0.45 0.05 210);
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -125,7 +125,7 @@
     --card-foreground: oklch(0.95 0.02 230);
     --popover: oklch(0.22 0.06 238);
     --popover-foreground: oklch(0.95 0.02 230);
-    --primary: oklch(0.65 0.15 240);
+    --primary: oklch(0.7 0.12 195);
     --primary-foreground: oklch(0.98 0 0);
     --secondary: oklch(0.28 0.07 235);
     --secondary-foreground: oklch(0.95 0.02 230);
@@ -166,12 +166,12 @@
 
 @layer components {
   .qm-selected {
-    background: color-mix(in oklch, #9acaca 38%, transparent);
+    background: color-mix(in oklch, var(--primary) 38%, transparent);
     color: #0f3f42;
   }
 
   .qm-selected:hover {
-    background: color-mix(in oklch, #9acaca 46%, transparent);
+    background: color-mix(in oklch, var(--primary) 46%, transparent);
   }
 
   .qm-selected-muted {
@@ -179,13 +179,13 @@
   }
 
   .qm-hover:hover {
-    background: color-mix(in oklch, #9acaca 18%, transparent);
+    background: color-mix(in oklch, var(--primary) 18%, transparent);
     color: var(--foreground);
   }
 
   .dark .qm-selected,
   .deep-blue .qm-selected {
-    background: color-mix(in oklch, #9acaca 27%, transparent);
+    background: color-mix(in oklch, var(--primary) 27%, transparent);
     color: #e8ffff;
   }
 
@@ -196,7 +196,7 @@
 
   .dark .qm-hover:hover,
   .deep-blue .qm-hover:hover {
-    background: color-mix(in oklch, #9acaca 17%, transparent);
+    background: color-mix(in oklch, var(--primary) 17%, transparent);
     color: var(--foreground);
   }
 }
