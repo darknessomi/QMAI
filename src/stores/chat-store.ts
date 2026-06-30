@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import type { ChatMessage } from "@/lib/llm-client"
 import type { AgentRunRecord } from "@/lib/agent/types"
+import type { ReferenceToken } from "@/lib/reference/types"
 import i18n from "@/i18n"
 
 export interface Conversation {
@@ -28,6 +29,7 @@ export interface DisplayMessage {
   discarded?: boolean
   agentToolCalls?: AgentRunRecord["toolCalls"]
   isAgentRunning?: boolean
+  attachedReferences?: ReferenceToken[]
 }
 
 interface ChatState {
