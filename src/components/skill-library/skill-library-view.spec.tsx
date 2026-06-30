@@ -10,12 +10,14 @@ import { SkillLibrarySidebarPanel, SkillLibraryView } from "./skill-library-view
 
 const readFileMock = vi.hoisted(() => vi.fn())
 const writeFileMock = vi.hoisted(() => vi.fn())
+const writeFileAtomicMock = vi.hoisted(() => vi.fn())
 const joinMock = vi.hoisted(() => vi.fn(async (...parts: string[]) => parts.join("/")))
 let savedConfigContent = ""
 
 vi.mock("@/commands/fs", () => ({
   readFile: readFileMock,
   writeFile: writeFileMock,
+  writeFileAtomic: writeFileAtomicMock,
 }))
 
 vi.mock("@tauri-apps/api/path", () => ({
@@ -92,6 +94,9 @@ describe("SkillLibraryView", () => {
       throw new Error("missing")
     })
     writeFileMock.mockImplementation(async (_path: string, content: string) => {
+      savedConfigContent = content
+    })
+    writeFileAtomicMock.mockImplementation(async (_path: string, content: string) => {
       savedConfigContent = content
     })
     useWikiStore.getState().setProject({
@@ -296,6 +301,126 @@ describe("SkillLibraryView", () => {
     expect(container.textContent).toContain("技能名称不能为空")
     expect(writeFileMock).not.toHaveBeenCalled()
 
+    cleanup(root, container)
+  })
+
+  it("does not toggle a skill from the sidebar when the current draft is unsaved and discard is cancelled", async () => {
+    const { container, root } = await renderLibrary()
+    const nameInput = container.querySelector<HTMLInputElement>('[data-testid="skill-name-input"]')
+    expect(nameInput).not.toBeNull()
+
+    await setInputValue(nameInput!, "未保存的技能草稿")
+    expect(useWikiStore.getState().skillLibraryDraftDirty).toBe(true)
+
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false)
+    const checkbox = container.querySelector<HTMLInputElement>('[data-skill-id="built-in:reduce-explanation"] input')
+    expect(checkbox).not.toBeNull()
+
+    await act(async () => {
+      checkbox?.click()
+    })
+    await flushEffects()
+
+    expect(confirmSpy).toHaveBeenCalledWith("当前 Skill 还有未保存修改，确定放弃修改吗？")
+    expect(writeFileMock).not.toHaveBeenCalled()
+    expect(checkbox?.checked).toBe(true)
+    expect(container.querySelector<HTMLInputElement>('[data-testid="skill-name-input"]')?.value).toBe("未保存的技能草稿")
+
+    confirmSpy.mockRestore()
+    cleanup(root, container)
+  })
+
+  it("does not pretend to save when no project is open", async () => {
+    useWikiStore.getState().setProject(null)
+    const { container, root } = await renderView()
+    const nameInput = container.querySelector<HTMLInputElement>('[data-testid="skill-name-input"]')
+    const saveButton = container.querySelector<HTMLButtonElement>('[data-testid="skill-save-button"]')
+    expect(nameInput).not.toBeNull()
+    expect(saveButton).not.toBeNull()
+    expect(nameInput?.disabled).toBe(true)
+
+    await setInputValue(nameInput!, "综合去AI味-无项目")
+
+    expect(saveButton?.disabled).toBe(true)
+    expect(container.textContent).toContain("请先打开项目")
+    expect(writeFileMock).not.toHaveBeenCalled()
+
+    cleanup(root, container)
+  })
+
+  it("loads the skill config once when sidebar and detail render together", async () => {
+    const { container, root } = await renderLibrary()
+
+    expect(container.textContent).toContain("综合去AI味")
+    expect(readFileMock).toHaveBeenCalledTimes(2)
+    expect(readFileMock).toHaveBeenNthCalledWith(1, "C:/project/de-ai-skills.json")
+    expect(readFileMock).toHaveBeenNthCalledWith(2, "C:/project/de-ai-skill.txt")
+
+    cleanup(root, container)
+  })
+
+  it("offers recovery actions when the json skill config is corrupt and restores from backup", async () => {
+    const backup = JSON.stringify({
+      version: 1,
+      defaultSkillId: "project:backup",
+      disabledSkillIds: [],
+      projectSkills: [{
+        id: "project:backup",
+        name: "备份 Skill",
+        description: "从备份恢复",
+        templateId: "backup",
+        content: "备份规则",
+        source: "project",
+        createdAt: 1000,
+        updatedAt: 1000,
+      }],
+      builtInSkillOverrides: [],
+    })
+    readFileMock
+      .mockResolvedValueOnce("{bad json")
+      .mockResolvedValueOnce(backup)
+
+    const { container, root } = await renderView()
+
+    expect(container.textContent).toContain("技能库配置文件损坏")
+    const restoreButton = container.querySelector<HTMLButtonElement>('[data-testid="skill-restore-backup-button"]')
+    expect(restoreButton).not.toBeNull()
+
+    await act(async () => {
+      restoreButton?.click()
+    })
+    await flushEffects()
+
+    expect(writeFileAtomicMock).toHaveBeenCalledWith(
+      "C:/project/de-ai-skills.json",
+      JSON.stringify({ ...JSON.parse(backup), lastChapterDeAiSkillId: null }, null, 2),
+    )
+    expect(container.textContent).toContain("备份 Skill")
+
+    cleanup(root, container)
+  })
+
+  it("can recreate a default config after the json skill config is corrupt", async () => {
+    readFileMock.mockResolvedValueOnce("{bad json")
+    const { container, root } = await renderView()
+
+    expect(container.textContent).toContain("技能库配置文件损坏")
+    const recreateButton = container.querySelector<HTMLButtonElement>('[data-testid="skill-recreate-config-button"]')
+    expect(recreateButton).not.toBeNull()
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true)
+
+    await act(async () => {
+      recreateButton?.click()
+    })
+    await flushEffects()
+
+    expect(writeFileAtomicMock).toHaveBeenCalledWith(
+      "C:/project/de-ai-skills.json",
+      expect.stringContaining('"defaultSkillId": "built-in:comprehensive"'),
+    )
+    expect(container.textContent).toContain("综合去AI味")
+
+    confirmSpy.mockRestore()
     cleanup(root, container)
   })
 })

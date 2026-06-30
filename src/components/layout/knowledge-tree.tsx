@@ -280,6 +280,8 @@ export function KnowledgeTree({
   const [renameValue, setRenameValue] = useState("")
   const [renamingBusy, setRenamingBusy] = useState(false)
   const [moveMenuTarget, setMoveMenuTarget] = useState<string | null>(null)
+  const [chapterBatchMode, setChapterBatchMode] = useState(false)
+  const [selectedChapterPaths, setSelectedChapterPaths] = useState<Set<string>>(() => new Set())
   const [dragSource, setDragSource] = useState<string | null>(null)
   const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -383,6 +385,28 @@ export function KnowledgeTree({
       })
   }, [effectivePages])
 
+  const selectableChapterPaths = useMemo(() => sortedChapterPages.map((page) => page.path), [sortedChapterPages])
+  const selectedChapterCount = selectedChapterPaths.size
+  const allChaptersSelected = selectableChapterPaths.length > 0
+    && selectableChapterPaths.every((path) => selectedChapterPaths.has(path))
+
+  useEffect(() => {
+    if (filterType !== "chapter") {
+      setChapterBatchMode(false)
+      setSelectedChapterPaths((previous) => previous.size > 0 ? new Set() : previous)
+      return
+    }
+
+    const validPaths = new Set(selectableChapterPaths)
+    setSelectedChapterPaths((previous) => {
+      const next = new Set<string>()
+      for (const path of previous) {
+        if (validPaths.has(path)) next.add(path)
+      }
+      return next.size === previous.size ? previous : next
+    })
+  }, [filterType, selectableChapterPaths])
+
   const sectionRootPath = useMemo(() => {
     if (!project) return null
     return `${normalizePath(project.path)}/wiki/${filterType === "chapter" ? "chapters" : "outlines"}`
@@ -401,30 +425,51 @@ export function KnowledgeTree({
     }))
   }, [sectionNodes])
 
-  const handleMoveToVolume = useCallback(async (sourcePath: string, targetVolumePath: string) => {
+  const handleMoveChaptersToVolume = useCallback(async (sourcePaths: string[], targetVolumePath: string) => {
     if (!project) return
-    const normalizedSource = normalizePath(sourcePath)
-    const fileName = normalizedSource.split("/").pop()
-    if (!fileName) return
+    const normalizedTargetVolumePath = normalizePath(targetVolumePath)
+    const normalizedSources = Array.from(new Set(sourcePaths.map((sourcePath) => normalizePath(sourcePath))))
+    const plans: Array<{ source: string; dest: string }> = []
+    const plannedDestinations = new Set<string>()
 
-    const destPath = `${targetVolumePath}/${fileName}`
-    if (normalizedSource === destPath) return
+    for (const normalizedSource of normalizedSources) {
+      if (getDirName(normalizedSource) === normalizedTargetVolumePath) continue
+      const fileName = normalizedSource.split("/").pop()
+      if (!fileName) continue
 
-    if (await fileExists(destPath)) {
-      window.alert(t("knowledgeTree.moveTargetExists"))
+      const destPath = `${normalizedTargetVolumePath}/${fileName}`
+      if (normalizedSource === destPath) continue
+
+      if (plannedDestinations.has(destPath) || await fileExists(destPath)) {
+        window.alert(t("knowledgeTree.moveTargetExists"))
+        return
+      }
+
+      plannedDestinations.add(destPath)
+      plans.push({ source: normalizedSource, dest: destPath })
+    }
+
+    if (plans.length === 0) {
+      setMoveMenuTarget(null)
+      setPageMenu(null)
       return
     }
 
     try {
-      await copyFile(normalizedSource, destPath)
-      await deleteFile(normalizedSource)
+      for (const plan of plans) {
+        await copyFile(plan.source, plan.dest)
+        await deleteFile(plan.source)
+      }
 
       await loadPages()
       const tree = await listDirectory(normalizePath(project.path))
       setFileTree(tree)
       bumpDataVersion()
-      if (selectedFile === normalizedSource) {
-        setSelectedFile(destPath)
+      setSelectedChapterPaths(new Set())
+      setChapterBatchMode(false)
+      const selectedMove = selectedFile ? plans.find((plan) => plan.source === normalizePath(selectedFile)) : undefined
+      if (selectedMove) {
+        setSelectedFile(selectedMove.dest)
       }
     } catch (error) {
       console.error("[KnowledgeTree] move to volume failed:", error)
@@ -433,6 +478,30 @@ export function KnowledgeTree({
       setPageMenu(null)
     }
   }, [project, t, loadPages, setFileTree, bumpDataVersion, selectedFile, setSelectedFile])
+
+  const toggleChapterSelection = useCallback((pagePath: string) => {
+    const normalizedPath = normalizePath(pagePath)
+    setSelectedChapterPaths((previous) => {
+      const next = new Set(previous)
+      if (next.has(normalizedPath)) next.delete(normalizedPath)
+      else next.add(normalizedPath)
+      return next
+    })
+  }, [])
+
+  const handleToggleAllChapters = useCallback(() => {
+    setSelectedChapterPaths((previous) => {
+      if (selectableChapterPaths.length > 0 && selectableChapterPaths.every((path) => previous.has(path))) {
+        return new Set()
+      }
+      return new Set(selectableChapterPaths)
+    })
+  }, [selectableChapterPaths])
+
+  const exitChapterBatchMode = useCallback(() => {
+    setChapterBatchMode(false)
+    setSelectedChapterPaths(new Set())
+  }, [])
 
   const handleDeleteClick = useCallback(async (pagePath: string) => {
     if (!project) return
@@ -960,6 +1029,7 @@ export function KnowledgeTree({
         tags: [],
       }
       const isSelected = selectedFile === normalizedPath
+      const isChapterChecked = filterType === "chapter" && selectedChapterPaths.has(normalizedPath)
       const isArmed = armedPath === normalizedPath
       const isDeleting = deletingPath === normalizedPath
       const isDragSource = dragSource === normalizedPath
@@ -970,7 +1040,7 @@ export function KnowledgeTree({
           key={normalizedPath}
           data-knowledge-interactive="true"
           data-page-path={normalizedPath}
-          className={`group flex items-center gap-1 rounded-md ${isSelected ? "qm-selected" : "qm-hover"} ${isDragSource ? "ring-2 ring-primary/50" : ""} ${isInsertTarget ? "border-t-[3px] border-primary/70" : ""}`}
+          className={`group flex items-center gap-1 rounded-md ${isSelected ? "qm-selected" : "qm-hover"} ${isChapterChecked ? "ring-1 ring-primary/35" : ""} ${isDragSource ? "ring-2 ring-primary/50" : ""} ${isInsertTarget ? "border-t-[3px] border-primary/70" : ""}`}
           onContextMenu={(event) => handlePageContextMenu(event, normalizedPath)}
           onPointerDown={(event) => handleItemPointerDown(event, normalizedPath)}
           style={{
@@ -980,6 +1050,20 @@ export function KnowledgeTree({
             WebkitTouchCallout: filterType === "chapter" ? "none" : undefined,
           }}
         >
+          {filterType === "chapter" && chapterBatchMode && (
+            <input
+              type="checkbox"
+              checked={isChapterChecked}
+              aria-label={t("knowledgeTree.selectChapter", { title: page.title })}
+              className="ml-1 h-3.5 w-3.5 shrink-0 accent-primary"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => {
+                event.stopPropagation()
+                toggleChapterSelection(normalizedPath)
+              }}
+            />
+          )}
           <button
             type="button"
             onClick={() => handlePageClick(normalizedPath)}
@@ -1052,10 +1136,14 @@ export function KnowledgeTree({
     handleItemPointerDown,
     handlePageContextMenu,
     handlePageClick,
+    chapterBatchMode,
+    selectedChapterPaths,
+    toggleChapterSelection,
     dragSource,
     dragInsertIndex,
     isDragging,
     sortedChapterPages,
+    t,
   ])
 
   if (!project) {
@@ -1083,7 +1171,57 @@ export function KnowledgeTree({
         onContextMenu={handleBlankContextMenu}
         onPointerMove={handleContainerPointerMove}
       >
-        <div className="mb-2 px-2 text-xs font-semibold uppercase text-muted-foreground">{rootLabel}</div>
+        <div className="mb-2 flex items-center justify-between gap-2 px-2 text-xs font-semibold uppercase text-muted-foreground">
+          <span>{rootLabel}</span>
+        </div>
+        {filterType === "chapter" && chapterBatchMode && selectableChapterPaths.length > 0 && (
+          <div className="mb-2 flex items-center gap-2 px-2 text-xs">
+            <button
+              type="button"
+              className="rounded border px-2 py-1 hover:bg-accent"
+              onClick={(event) => {
+                event.stopPropagation()
+                handleToggleAllChapters()
+              }}
+            >
+              {allChaptersSelected ? t("knowledgeTree.clearChapterSelection") : t("knowledgeTree.selectAllChapters")}
+            </button>
+            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+              {selectedChapterCount > 0
+                ? t("knowledgeTree.selectedChapters", { count: selectedChapterCount })
+                : t("knowledgeTree.selectChaptersHint")}
+            </span>
+            {selectedChapterCount > 0 && volumeFolders.length > 0 && (
+              <select
+                aria-label={t("knowledgeTree.moveSelectedToVolume")}
+                value=""
+                className="h-7 max-w-[120px] rounded border bg-background px-2 text-xs"
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => {
+                  const targetVolumePath = event.target.value
+                  if (targetVolumePath) {
+                    void handleMoveChaptersToVolume(Array.from(selectedChapterPaths), targetVolumePath)
+                  }
+                }}
+              >
+                <option value="">{t("knowledgeTree.moveSelectedToVolume")}</option>
+                {volumeFolders.map((vol) => (
+                  <option key={vol.path} value={vol.path}>{vol.name}</option>
+                ))}
+              </select>
+            )}
+            <button
+              type="button"
+              className="rounded border px-2 py-1 hover:bg-accent"
+              onClick={(event) => {
+                event.stopPropagation()
+                exitChapterBatchMode()
+              }}
+            >
+              {t("knowledgeTree.exitBatchMode")}
+            </button>
+          </div>
+        )}
         {sectionNodes.length === 0 && pendingPages.length === 0 ? (
           <div className="px-2 py-4 text-center text-xs text-muted-foreground">{emptyLabel}</div>
         ) : (
@@ -1196,9 +1334,24 @@ export function KnowledgeTree({
                 </button>
                 {moveMenuTarget === pageMenu.path && (
                   <div className="max-h-48 overflow-y-auto border-t bg-background py-1 text-xs">
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent"
+                      onClick={() => {
+                        setChapterBatchMode(true)
+                        setSelectedChapterPaths(new Set())
+                        setMoveMenuTarget(null)
+                        setPageMenu(null)
+                      }}
+                    >
+                      <Check className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <span>{t("knowledgeTree.batchChapters")}</span>
+                    </button>
                     {volumeFolders.map((vol) => {
-                      const sourceDir = getDirName(pageMenu.path)
-                      const isCurrentVolume = sourceDir === vol.path
+                      const sourcePaths = selectedChapterPaths.has(pageMenu.path)
+                        ? Array.from(selectedChapterPaths)
+                        : [pageMenu.path]
+                      const isCurrentVolume = sourcePaths.every((sourcePath) => getDirName(sourcePath) === vol.path)
                       return (
                         <button
                           key={vol.path}
@@ -1207,7 +1360,7 @@ export function KnowledgeTree({
                           disabled={isCurrentVolume}
                           onClick={() => {
                             if (!isCurrentVolume) {
-                              void handleMoveToVolume(pageMenu.path, vol.path)
+                              void handleMoveChaptersToVolume(sourcePaths, vol.path)
                             }
                           }}
                         >

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useCallback, useRef, useMemo, useState, useLayoutEffect } from "react"
+import { type CSSProperties, Suspense, lazy, useEffect, useCallback, useRef, useMemo, useState, useLayoutEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { Check, MoreHorizontal, X } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -21,13 +21,14 @@ import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { getNextChatExpanded } from "./chat-layout"
 import { DeAiPreviewDialog } from "@/components/novel/de-ai-preview-dialog"
 import { TextTransformPreviewDialog } from "@/components/novel/text-transform-preview-dialog"
+import { DeAiSkillOptionsPanel } from "@/components/skill-library/de-ai-skill-picker"
+import { useDeAiSkillOptions } from "@/components/skill-library/use-de-ai-skill-options"
 import { buildDeAiRewriteMessages } from "@/lib/novel/de-ai-adapter"
 import {
-  isDeAiSkillModified,
   loadDeAiSkillConfig,
-  resolveAvailableDeAiSkills,
   resolveEffectiveDeAiSkill,
-  type DeAiSkill,
+  saveDeAiSkillConfig,
+  setLastChapterDeAiSkill,
 } from "@/lib/novel/de-ai-skill-library"
 import { startOutlineIngestTask } from "@/lib/novel/outline-generation"
 import { streamChat } from "@/lib/llm-client"
@@ -158,6 +159,22 @@ function getChapterTitleFromPath(path: string): string {
 const CHAPTER_TITLE_MIN_WIDTH_PX = 48
 const CHAPTER_TITLE_RESTING_EXTRA_WIDTH_PX = 2
 const CHAPTER_TITLE_EDITING_EXTRA_WIDTH_PX = 16
+const DE_AI_SKILL_PICKER_WIDTH_PX = 288
+
+function getDeAiSkillPickerPosition(anchor?: HTMLElement | null): CSSProperties {
+  if (!anchor) return { right: 24, top: 80 }
+  const rect = anchor.getBoundingClientRect()
+  const gap = 8
+  const viewportWidth = window.innerWidth || DE_AI_SKILL_PICKER_WIDTH_PX
+  const left = Math.min(
+    Math.max(rect.left, gap),
+    Math.max(gap, viewportWidth - DE_AI_SKILL_PICKER_WIDTH_PX - gap),
+  )
+  return {
+    left,
+    top: rect.bottom + gap,
+  }
+}
 
 export function PreviewPanel() {
   const { t } = useTranslation()
@@ -191,6 +208,7 @@ export function PreviewPanel() {
   const [deAiSourceContent, setDeAiSourceContent] = useState("")
   const [deAiCandidateContent, setDeAiCandidateContent] = useState("")
   const [deAiSkillName, setDeAiSkillName] = useState("")
+  const [deAiSkillMemoryWarning, setDeAiSkillMemoryWarning] = useState("")
   const [selectionTransformOpen, setSelectionTransformOpen] = useState(false)
   const [selectionTransformAction, setSelectionTransformAction] = useState<ChapterSelectionAction | null>(null)
   const [selectionTransformSelection, setSelectionTransformSelection] = useState<ChapterBodySelection | null>(null)
@@ -198,9 +216,8 @@ export function PreviewPanel() {
   const [selectionTransformCandidateContent, setSelectionTransformCandidateContent] = useState("")
   const [selectionTransformSkillName, setSelectionTransformSkillName] = useState("")
   const [deAiSkillPickerOpen, setDeAiSkillPickerOpen] = useState(false)
-  const [deAiSkillPickerLoading, setDeAiSkillPickerLoading] = useState(false)
-  const [deAiSkillPickerSkills, setDeAiSkillPickerSkills] = useState<DeAiSkill[]>([])
-  const [deAiSkillPickerModifiedIds, setDeAiSkillPickerModifiedIds] = useState<string[]>([])
+  const [deAiSkillPickerPosition, setDeAiSkillPickerPosition] = useState<CSSProperties>(() => getDeAiSkillPickerPosition())
+  const [chapterDeAiSkillId, setChapterDeAiSkillId] = useState<string | null | undefined>(undefined)
   const [pendingSelectionForDeAi, setPendingSelectionForDeAi] = useState<ChapterBodySelection | null>(null)
   const [chapterTitleDraft, setChapterTitleDraft] = useState("")
   const [chapterTitleEditing, setChapterTitleEditing] = useState(false)
@@ -216,12 +233,44 @@ export function PreviewPanel() {
   const lastLoadedRef = useRef<string>("")
   const fileContentRef = useRef(fileContent)
   const selectedFileRef = useRef<string | null>(selectedFile)
+  const deAiSkillMemoryWarningRef = useRef("")
+  const deAiSkillPickerRef = useRef<HTMLDivElement | null>(null)
   const chapterToolbarRef = useRef<HTMLDivElement | null>(null)
   const titleMeasureRef = useRef<HTMLSpanElement | null>(null)
+  const chapterDeAiOptions = useDeAiSkillOptions({
+    projectPath: project?.path,
+    selectedSkillId: chapterDeAiSkillId,
+    useLastChapterSkill: true,
+  })
 
   useEffect(() => {
     fileContentRef.current = fileContent
   }, [fileContent])
+
+  useEffect(() => {
+    setChapterDeAiSkillId(undefined)
+    deAiSkillMemoryWarningRef.current = ""
+    setDeAiSkillMemoryWarning("")
+  }, [project?.path])
+
+  const formatDeAiStatus = useCallback((status: string) => {
+    const warning = deAiSkillMemoryWarningRef.current || deAiSkillMemoryWarning
+    if (!status) return warning
+    return warning ? `${warning}；${status}` : status
+  }, [deAiSkillMemoryWarning])
+
+  useEffect(() => {
+    if (!deAiSkillPickerOpen) return
+    const handleDeAiSkillPickerMouseDown = (event: MouseEvent) => {
+      if (deAiSkillPickerRef.current?.contains(event.target as Node)) return
+      setDeAiSkillPickerOpen(false)
+      setPendingSelectionForDeAi(null)
+    }
+    document.addEventListener("mousedown", handleDeAiSkillPickerMouseDown)
+    return () => {
+      document.removeEventListener("mousedown", handleDeAiSkillPickerMouseDown)
+    }
+  }, [deAiSkillPickerOpen])
 
   const syncChapterToCanonicalPath = useCallback(async (path: string, markdown: string) => {
     const normalized = normalizeChapterWriting(markdown)
@@ -492,6 +541,9 @@ export function PreviewPanel() {
       {chapterWordCountMeta}
     </div>
   ) : null
+  const chapterDeAiSkillName = chapterHeader ? chapterDeAiOptions.effectiveName : "未启用"
+  const chapterDeAiButtonLabel = deAiProcessing ? "处理中" : `去AI味：${chapterDeAiSkillName}`
+  const chapterDeAiButtonTitle = `当前去AI味 Skill：${chapterDeAiSkillName}`
 
   useEffect(() => {
     if (!chapterHeader) {
@@ -777,7 +829,7 @@ export function PreviewPanel() {
       setSaveStatus("未配置可用的 AI 模型，无法去AI味")
       return
     }
-    setSaveStatus(`去AI味处理中，使用 Skill：${skillName}...`)
+    setSaveStatus(formatDeAiStatus(`去AI味处理中，使用 Skill：${skillName}...`))
     const source = fileContent
     let result = ""
     try {
@@ -793,7 +845,7 @@ export function PreviewPanel() {
             setDeAiCandidateContent(result)
             setDeAiPreviewOpen(true)
             setDeAiProcessing(false)
-            setSaveStatus(`本次使用 Skill：${skillName}`)
+            setSaveStatus(formatDeAiStatus(`本次使用 Skill：${skillName}`))
           },
           onError: (error) => {
             console.error("去AI味处理失败:", error)
@@ -805,7 +857,7 @@ export function PreviewPanel() {
       console.error("去AI味处理失败:", err)
       setDeAiProcessing(false)
     }
-  }, [fileContent])
+  }, [fileContent, formatDeAiStatus])
 
   const handleDeAiApply = useCallback(() => {
     setDeAiPreviewOpen(false)
@@ -853,9 +905,10 @@ export function PreviewPanel() {
     const actionFile = selectedFileRef.current
     const actionLabel = action === "polish" ? "AI润色" : "去AI味"
     setSelectionTransformSkillName(action === "de-ai" ? skillName ?? "" : "")
-    setSaveStatus(action === "de-ai" && skillName
+    const transformStatus = action === "de-ai" && skillName
       ? `${actionLabel}处理中，使用 Skill：${skillName}...`
-      : `${actionLabel}处理中...`)
+      : `${actionLabel}处理中...`
+    setSaveStatus(action === "de-ai" ? formatDeAiStatus(transformStatus) : transformStatus)
 
     let result = ""
     try {
@@ -876,7 +929,7 @@ export function PreviewPanel() {
             setSelectionTransformCandidateContent(result)
             setSelectionTransformSkillName(action === "de-ai" ? skillName ?? "" : "")
             setSelectionTransformOpen(true)
-            setSaveStatus("")
+            setSaveStatus(formatDeAiStatus(""))
           },
           onError: (error) => {
             if (selectedFileRef.current !== actionFile) return
@@ -891,38 +944,32 @@ export function PreviewPanel() {
       console.error(`${actionLabel}失败:`, err)
       setSaveStatus(`${actionLabel}失败：${message}`)
     }
-  }, [])
+  }, [formatDeAiStatus])
 
-  const openDeAiSkillPicker = useCallback(async (selection: ChapterBodySelection | null) => {
+  const openDeAiSkillPicker = useCallback((selection: ChapterBodySelection | null, anchor?: HTMLElement | null) => {
     if (deAiProcessing) return
     setPendingSelectionForDeAi(selection)
+    setDeAiSkillPickerPosition(getDeAiSkillPickerPosition(anchor))
     setDeAiSkillPickerOpen(true)
-    setDeAiSkillPickerLoading(true)
-    setSaveStatus("")
-    try {
-      const config = await loadDeAiSkillConfig(project?.path ?? null)
-      const skills = resolveAvailableDeAiSkills(config)
-      setDeAiSkillPickerSkills(skills)
-      setDeAiSkillPickerModifiedIds(skills.filter((skill) => isDeAiSkillModified(config, skill.id)).map((skill) => skill.id))
-      if (skills.length === 0) {
-        setSaveStatus("暂无可用去AI味技能")
-      }
-    } catch (err) {
-      console.error("读取去AI味技能失败:", err)
-      setDeAiSkillPickerSkills([])
-      setDeAiSkillPickerModifiedIds([])
-      setSaveStatus("读取去AI味技能失败")
-    } finally {
-      setDeAiSkillPickerLoading(false)
+    deAiSkillMemoryWarningRef.current = ""
+    setDeAiSkillMemoryWarning("")
+    if (chapterDeAiOptions.loadError) {
+      setSaveStatus(chapterDeAiOptions.loadError)
+      return
     }
-  }, [deAiProcessing, project?.path])
+    if (!chapterDeAiOptions.loading && chapterDeAiOptions.skills.length === 0) {
+      setSaveStatus("暂无可用去AI味技能")
+      return
+    }
+    setSaveStatus("")
+  }, [chapterDeAiOptions.loadError, chapterDeAiOptions.loading, chapterDeAiOptions.skills.length, deAiProcessing])
 
   const handlePickedDeAiSkill = useCallback(async (skillId: string) => {
     const selection = pendingSelectionForDeAi
     setDeAiSkillPickerOpen(false)
     setPendingSelectionForDeAi(null)
 
-    let skill = deAiSkillPickerSkills.find((item) => item.id === skillId) ?? null
+    let skill = chapterDeAiOptions.skills.find((item) => item.id === skillId) ?? null
     if (!skill) {
       const config = await loadDeAiSkillConfig(project?.path ?? null)
       skill = resolveEffectiveDeAiSkill(config, skillId)
@@ -931,13 +978,28 @@ export function PreviewPanel() {
       setSaveStatus("暂无可用去AI味技能")
       return
     }
+    setChapterDeAiSkillId(skill.id)
+    if (project) {
+      try {
+        const config = await loadDeAiSkillConfig(project.path)
+        await saveDeAiSkillConfig(project.path, setLastChapterDeAiSkill(config, skill.id))
+        deAiSkillMemoryWarningRef.current = ""
+        setDeAiSkillMemoryWarning("")
+        bumpDataVersion()
+      } catch (err) {
+        console.error("保存章节去AI味 Skill 选择失败:", err)
+        deAiSkillMemoryWarningRef.current = "未能记住本次去AI味 Skill 选择，本次处理仍会继续"
+        setDeAiSkillMemoryWarning("未能记住本次去AI味 Skill 选择，本次处理仍会继续")
+        setSaveStatus("未能记住本次去AI味 Skill 选择，本次处理仍会继续")
+      }
+    }
 
     if (selection) {
       await runSelectionTransform("de-ai", selection, skill.content, skill.name)
       return
     }
     await runWholeChapterDeAi(skill.content, skill.name)
-  }, [deAiSkillPickerSkills, pendingSelectionForDeAi, project?.path, runSelectionTransform, runWholeChapterDeAi])
+  }, [bumpDataVersion, chapterDeAiOptions.skills, pendingSelectionForDeAi, project, runSelectionTransform, runWholeChapterDeAi])
 
   const handleSelectionAction = useCallback((action: ChapterSelectionAction, selection: ChapterBodySelection) => {
     if (action === "de-ai") {
@@ -1141,14 +1203,15 @@ export function PreviewPanel() {
                   {chapterHeader ? (
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={(e) => {
                         setChapterToolbarMoreOpen(false)
-                        void openDeAiSkillPicker(null)
+                        void openDeAiSkillPicker(null, e.currentTarget)
                       }}
                       disabled={deAiProcessing}
                       className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                      title={chapterDeAiButtonTitle}
                     >
-                      {deAiProcessing ? "处理中" : "去AI味"}
+                      <span className="block truncate">{chapterDeAiButtonLabel}</span>
                     </button>
                   ) : null}
                   {canIngestOutline ? (
@@ -1258,11 +1321,12 @@ export function PreviewPanel() {
             <div className="relative shrink-0">
               <button
                 type="button"
-                onClick={() => void openDeAiSkillPicker(null)}
+                onClick={(e) => void openDeAiSkillPicker(null, e.currentTarget)}
                 disabled={deAiProcessing}
-                className="shrink-0 rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                className="max-w-[11rem] shrink-0 rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                title={chapterDeAiButtonTitle}
               >
-                {deAiProcessing ? "处理中" : "去AI味"}
+                <span className="block truncate">{chapterDeAiButtonLabel}</span>
               </button>
             </div>
           ) : null}
@@ -1408,7 +1472,11 @@ export function PreviewPanel() {
         </div>
       ) : null}
       {deAiSkillPickerOpen ? (
-        <div className="fixed right-6 top-20 z-50 w-72 rounded-md border bg-popover p-2 text-sm text-popover-foreground shadow-lg">
+        <div
+          ref={deAiSkillPickerRef}
+          className="fixed z-50 w-72 rounded-md border bg-popover p-2 text-sm text-popover-foreground shadow-lg"
+          style={deAiSkillPickerPosition}
+        >
           <div className="mb-1 flex items-center justify-between gap-2 px-1">
             <div className="truncate text-sm font-medium">
               {pendingSelectionForDeAi ? "选择选中文本去AI味技能" : "选择去AI味技能"}
@@ -1426,34 +1494,20 @@ export function PreviewPanel() {
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-          {deAiSkillPickerLoading ? (
-            <div className="px-2 py-3 text-xs text-muted-foreground">正在读取技能...</div>
-          ) : deAiSkillPickerSkills.length === 0 ? (
-            <div className="px-2 py-3 text-xs text-muted-foreground">暂无可用去AI味技能</div>
-          ) : (
-            <div className="max-h-72 overflow-y-auto">
-              {deAiSkillPickerSkills.map((skill) => (
-                <button
-                  key={skill.id}
-                  type="button"
-                  className="block w-full rounded px-2 py-2 text-left hover:bg-accent"
-                  onClick={() => void handlePickedDeAiSkill(skill.id)}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-sm">{skill.name}</span>
-                    {deAiSkillPickerModifiedIds.includes(skill.id) ? (
-                      <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
-                        已修改
-                      </span>
-                    ) : null}
-                  </div>
-                  {skill.description ? (
-                    <div className="mt-0.5 truncate text-xs text-muted-foreground">{skill.description}</div>
-                  ) : null}
-                </button>
-              ))}
-            </div>
-          )}
+          <DeAiSkillOptionsPanel
+            loading={chapterDeAiOptions.loading}
+            errorMessage={chapterDeAiOptions.loadError}
+            emptyMessage="暂无可用去AI味技能"
+            skills={chapterDeAiOptions.skills}
+            currentSkillId={chapterDeAiOptions.currentSkillId}
+            defaultSkillId={chapterDeAiOptions.defaultSkillId}
+            modifiedSkillIds={chapterDeAiOptions.modifiedSkillIds}
+            onClose={() => {
+              setDeAiSkillPickerOpen(false)
+              setPendingSelectionForDeAi(null)
+            }}
+            onPick={(skillId) => void handlePickedDeAiSkill(skillId)}
+          />
         </div>
       ) : null}
       <DeAiPreviewDialog

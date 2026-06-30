@@ -5,8 +5,11 @@ import {
   deleteProjectDeAiSkill,
   getAllDeAiSkills,
   isDeAiSkillModified,
+  isDeAiSkillConfigCorruptError,
   loadDeAiSkillConfig,
+  recreateDeAiSkillConfig,
   resetBuiltInDeAiSkill,
+  restoreDeAiSkillConfigFromBackup,
   saveDeAiSkillConfig,
   setDeAiSkillEnabled,
   setDefaultDeAiSkill,
@@ -38,6 +41,51 @@ function hasSkillDraftChanged(skill: DeAiSkill, name: string, description: strin
     || normalizeDraftText(content) !== normalizeDraftText(skill.content)
 }
 
+const skillLibraryLoadPromises = new Map<string, Promise<DeAiSkillConfig>>()
+
+function loadSharedDeAiSkillConfig(projectPath: string | null | undefined, dataVersion: number) {
+  const key = `${projectPath ?? ""}:${dataVersion}`
+  const existing = skillLibraryLoadPromises.get(key)
+  if (existing) return existing
+  const promise = loadDeAiSkillConfig(projectPath).finally(() => {
+    skillLibraryLoadPromises.delete(key)
+  })
+  skillLibraryLoadPromises.set(key, promise)
+  return promise
+}
+
+function useSkillLibraryConfig(
+  projectPath: string | null | undefined,
+  dataVersion: number,
+  selectedSkillId: string | null,
+  setSelectedSkillId: (id: string | null) => void,
+) {
+  const [config, setConfig] = useState<DeAiSkillConfig | null>(null)
+  const [loadError, setLoadError] = useState("")
+
+  useEffect(() => {
+    let cancelled = false
+    setConfig(null)
+    setLoadError("")
+    loadSharedDeAiSkillConfig(projectPath, dataVersion)
+      .then((loaded) => {
+        if (cancelled) return
+        setConfig(loaded)
+        setSelectedSkillId(resolveInitialSkillId(loaded, selectedSkillId))
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setConfig(null)
+        setLoadError(isDeAiSkillConfigCorruptError(error) ? "技能库配置文件损坏" : "技能库加载失败")
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [dataVersion, projectPath])
+
+  return { config, setConfig, loadError, setLoadError }
+}
+
 export function SkillLibrarySidebarPanel() {
   const project = useWikiStore((s) => s.project)
   const dataVersion = useWikiStore((s) => s.dataVersion)
@@ -47,38 +95,27 @@ export function SkillLibrarySidebarPanel() {
   const draftDirty = useWikiStore((s) => s.skillLibraryDraftDirty)
   const setDraftDirty = useWikiStore((s) => s.setSkillLibraryDraftDirty)
 
-  const [config, setConfig] = useState<DeAiSkillConfig | null>(null)
+  const { config, setConfig, loadError } = useSkillLibraryConfig(
+    project?.path,
+    dataVersion,
+    selectedSkillId,
+    setSelectedSkillId,
+  )
   const [message, setMessage] = useState("")
   const [saving, setSaving] = useState(false)
 
   const allSkills = useMemo(() => config ? getAllDeAiSkills(config) : [], [config])
   const disabledSkillIds = new Set(config?.disabledSkillIds ?? [])
 
-  useEffect(() => {
-    let cancelled = false
-    setConfig(null)
-    setMessage("")
-    loadDeAiSkillConfig(project?.path)
-      .then((loaded) => {
-        if (cancelled) return
-        setConfig(loaded)
-        setSelectedSkillId(resolveInitialSkillId(loaded, selectedSkillId))
-      })
-      .catch(() => {
-        if (!cancelled) setMessage("技能库加载失败")
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [dataVersion, project?.path])
-
   async function persist(nextConfig: DeAiSkillConfig, nextSelectedSkillId: string) {
+    if (!project) {
+      setMessage("请先打开项目")
+      return
+    }
     setSaving(true)
     try {
-      if (project) {
-        await saveDeAiSkillConfig(project.path, nextConfig)
-        bumpDataVersion()
-      }
+      await saveDeAiSkillConfig(project.path, nextConfig)
+      bumpDataVersion()
       setConfig(nextConfig)
       setSelectedSkillId(nextSelectedSkillId)
       setMessage("已保存")
@@ -90,7 +127,7 @@ export function SkillLibrarySidebarPanel() {
   }
 
   async function handleCreateSkill() {
-    if (!config || saving) return
+    if (!config || !project || saving) return
     if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
     if (draftDirty) setDraftDirty(false)
     const now = Date.now()
@@ -99,7 +136,9 @@ export function SkillLibrarySidebarPanel() {
   }
 
   async function handleToggleSkill(skill: DeAiSkill, enabled: boolean) {
-    if (!config || saving) return
+    if (!config || !project || saving) return
+    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty) setDraftDirty(false)
     const next = setDeAiSkillEnabled(config, skill.id, enabled)
     await persist(next, selectedSkillId ?? next.defaultSkillId)
   }
@@ -117,13 +156,15 @@ export function SkillLibrarySidebarPanel() {
           type="button"
           onClick={() => void handleCreateSkill()}
           className="rounded-md border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
-          disabled={!config || saving}
+          disabled={!config || !project || saving}
         >
           新建技能
         </button>
       </div>
 
-      {message ? <div className="border-b px-3 py-2 text-xs text-muted-foreground">{message}</div> : null}
+      {loadError || message ? (
+        <div className="border-b px-3 py-2 text-xs text-muted-foreground">{loadError || message}</div>
+      ) : null}
 
       <div data-testid="skill-list" className="min-h-0 flex-1 overflow-y-auto p-2">
         {allSkills.map((skill) => {
@@ -193,7 +234,12 @@ export function SkillLibraryView() {
   const draftDirty = useWikiStore((s) => s.skillLibraryDraftDirty)
   const setDraftDirty = useWikiStore((s) => s.setSkillLibraryDraftDirty)
 
-  const [config, setConfig] = useState<DeAiSkillConfig | null>(null)
+  const { config, setConfig, loadError, setLoadError } = useSkillLibraryConfig(
+    project?.path,
+    dataVersion,
+    selectedSkillId,
+    setSelectedSkillId,
+  )
   const [draftName, setDraftName] = useState("")
   const [draftDescription, setDraftDescription] = useState("")
   const [draftContent, setDraftContent] = useState("")
@@ -202,33 +248,18 @@ export function SkillLibraryView() {
 
   const allSkills = useMemo(() => config ? getAllDeAiSkills(config) : [], [config])
   const selectedSkill = allSkills.find((skill) => skill.id === selectedSkillId) ?? allSkills[0] ?? null
-  const selectedIsEditable = selectedSkill != null
+  const selectedIsEditable = Boolean(project && selectedSkill)
   const selectedIsBuiltIn = selectedSkill?.id.startsWith("built-in:") ?? false
   const selectedHasBuiltInOverride = selectedIsBuiltIn
     && Boolean(config?.builtInSkillOverrides.some((skill) => skill.id === selectedSkill?.id))
   const selectedModified = Boolean(config && selectedSkill && isDeAiSkillModified(config, selectedSkill.id))
+  const selectedEnabled = Boolean(
+    config && selectedSkill && !config.disabledSkillIds.includes(selectedSkill.id),
+  )
   const draftChanged = Boolean(
     selectedSkill && hasSkillDraftChanged(selectedSkill, draftName, draftDescription, draftContent),
   )
-  const canSaveDraft = selectedIsEditable && draftChanged && !saving
-
-  useEffect(() => {
-    let cancelled = false
-    setConfig(null)
-    setMessage("")
-    loadDeAiSkillConfig(project?.path)
-      .then((loaded) => {
-        if (cancelled) return
-        setConfig(loaded)
-        setSelectedSkillId(resolveInitialSkillId(loaded, selectedSkillId))
-      })
-      .catch(() => {
-        if (!cancelled) setMessage("技能库加载失败")
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [dataVersion, project?.path])
+  const canSaveDraft = Boolean(project) && selectedIsEditable && draftChanged && !saving
 
   useEffect(() => {
     if (!draftDirty) return
@@ -260,12 +291,14 @@ export function SkillLibraryView() {
   }
 
   async function persist(nextConfig: DeAiSkillConfig, nextSelectedSkillId = selectedSkillId ?? "") {
+    if (!project) {
+      setMessage("请先打开项目")
+      return
+    }
     setSaving(true)
     try {
-      if (project) {
-        await saveDeAiSkillConfig(project.path, nextConfig)
-        bumpDataVersion()
-      }
+      await saveDeAiSkillConfig(project.path, nextConfig)
+      bumpDataVersion()
       setConfig(nextConfig)
       setDraftDirty(false)
       setSelectedSkillId(nextSelectedSkillId)
@@ -278,7 +311,7 @@ export function SkillLibraryView() {
   }
 
   async function handleCopySkill() {
-    if (!config || !selectedSkill) return
+    if (!config || !project || !selectedSkill) return
     if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
     if (draftDirty) setDraftDirty(false)
     const now = Date.now()
@@ -317,11 +350,15 @@ export function SkillLibraryView() {
 
   async function handleSetDefault() {
     if (!config || !selectedSkill) return
+    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty) setDraftDirty(false)
     await persist(setDefaultDeAiSkill(config, selectedSkill.id))
   }
 
   async function handleDeleteSkill() {
     if (!config || !selectedSkill || selectedIsBuiltIn) return
+    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty) setDraftDirty(false)
     const confirmed = window.confirm(`确定删除「${selectedSkill.name}」吗？`)
     if (!confirmed) return
     const next = deleteProjectDeAiSkill(config, selectedSkill.id)
@@ -331,9 +368,49 @@ export function SkillLibraryView() {
 
   async function handleResetBuiltInSkill() {
     if (!config || !selectedSkill || !selectedIsBuiltIn || !selectedHasBuiltInOverride) return
+    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
+    if (draftDirty) setDraftDirty(false)
     const confirmed = window.confirm(`确定将「${selectedSkill.name}」恢复为内置默认内容吗？当前项目对此技能的修改会被清除。`)
     if (!confirmed) return
     await persist(resetBuiltInDeAiSkill(config, selectedSkill.id), selectedSkill.id)
+  }
+
+  async function handleRestoreBackup() {
+    if (!project || saving) return
+    setSaving(true)
+    try {
+      const restored = await restoreDeAiSkillConfigFromBackup(project.path)
+      setConfig(restored)
+      setLoadError("")
+      setDraftDirty(false)
+      setSelectedSkillId(resolveInitialSkillId(restored, selectedSkillId))
+      setMessage("已从备份恢复")
+      bumpDataVersion()
+    } catch {
+      setMessage("备份恢复失败")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRecreateConfig() {
+    if (!project || saving) return
+    const confirmed = window.confirm("确定重新创建技能库配置吗？这会用默认内置 Skill 覆盖当前损坏的配置文件。")
+    if (!confirmed) return
+    setSaving(true)
+    try {
+      const recreated = await recreateDeAiSkillConfig(project.path)
+      setConfig(recreated)
+      setLoadError("")
+      setDraftDirty(false)
+      setSelectedSkillId(resolveInitialSkillId(recreated, selectedSkillId))
+      setMessage("已重新创建技能库配置")
+      bumpDataVersion()
+    } catch {
+      setMessage("重新创建技能库配置失败")
+    } finally {
+      setSaving(false)
+    }
   }
 
   useEffect(() => {
@@ -353,10 +430,39 @@ export function SkillLibraryView() {
       <div className="shrink-0 border-b px-5 py-4">
         <h1 className="text-lg font-semibold">技能库</h1>
         <p className="mt-1 text-sm text-muted-foreground">编辑当前选中的去AI味 Skill 内容。</p>
+        {!project ? <p className="mt-1 text-sm text-destructive">请先打开项目</p> : null}
       </div>
 
       <main className="min-h-0 flex-1 overflow-y-auto p-5">
-        {!selectedSkill ? (
+        {loadError ? (
+          <div className="mx-auto max-w-3xl rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+            <div className="text-sm font-medium text-destructive">{loadError}</div>
+            <p className="mt-2 text-sm text-muted-foreground">
+              当前项目的技能库配置无法读取。你可以先尝试从备份恢复；如果没有可用备份，再重新创建默认配置。
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                data-testid="skill-restore-backup-button"
+                type="button"
+                onClick={() => void handleRestoreBackup()}
+                disabled={!project || saving}
+                className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                使用备份恢复
+              </button>
+              <button
+                data-testid="skill-recreate-config-button"
+                type="button"
+                onClick={() => void handleRecreateConfig()}
+                disabled={!project || saving}
+                className="rounded-md border px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                重新创建配置
+              </button>
+              {message ? <span className="text-sm text-muted-foreground">{message}</span> : null}
+            </div>
+          </div>
+        ) : !selectedSkill ? (
           <div className="text-sm text-muted-foreground">暂无技能。</div>
         ) : (
           <div className="mx-auto flex max-w-5xl flex-col gap-4">
@@ -381,7 +487,7 @@ export function SkillLibraryView() {
                   type="button"
                   onClick={() => void handleCopySkill()}
                   className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
-                  disabled={saving}
+                  disabled={!project || saving}
                 >
                   复制为项目技能
                 </button>
@@ -390,7 +496,7 @@ export function SkillLibraryView() {
                   type="button"
                   onClick={() => void handleSetDefault()}
                   className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
-                  disabled={saving || config?.defaultSkillId === selectedSkill.id}
+                  disabled={!project || saving || !selectedEnabled || config?.defaultSkillId === selectedSkill.id}
                 >
                   设为默认
                 </button>
@@ -400,7 +506,7 @@ export function SkillLibraryView() {
                     type="button"
                     onClick={() => void handleResetBuiltInSkill()}
                     className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={saving || !selectedHasBuiltInOverride}
+                    disabled={!project || saving || !selectedHasBuiltInOverride}
                   >
                     恢复默认
                   </button>
@@ -411,7 +517,7 @@ export function SkillLibraryView() {
                     type="button"
                     onClick={() => void handleDeleteSkill()}
                     className="rounded-md border px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10"
-                    disabled={saving}
+                    disabled={!project || saving}
                   >
                     删除
                   </button>

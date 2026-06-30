@@ -20,7 +20,7 @@ import { readFile, writeFile, createDirectory, deleteFile } from "@/commands/fs"
 import { searchWiki, tokenizeQuery } from "@/lib/search"
 import { detectLastGeneratedChapterNumber, findChapterFileByNumber, getNextChapterNumber, readSelectedChapterNumberForFile, resolveTargetChapterNumberForChat } from "@/lib/novel/chapter-utils"
 import { buildDeAiSkillSystemPrompt, buildQmQuaiSystemPrompt, injectDeAiDirective } from "@/lib/novel/de-ai-adapter"
-import { loadDeAiSkillConfig, resolveEffectiveDeAiSkill } from "@/lib/novel/de-ai-skill-library"
+import { loadEffectiveDeAiSkillSafely } from "@/lib/novel/de-ai-skill-library"
 import { cleanGeneratedChapterContentWithTitle } from "@/lib/novel/chapter-content-cleanup"
 import { normalizePath, getFileName, getRelativePath } from "@/lib/path-utils"
 import { refreshProjectState } from "@/lib/project-refresh"
@@ -222,6 +222,7 @@ export function ChatPanel() {
   const lastScrollTopRef = useRef(0)
 
   const [chapterSaveStatus, setChapterSaveStatus] = useState<string>("")
+  const [deAiSkillWarningMessage, setDeAiSkillWarningMessage] = useState<string>("")
   const [isSavingChapter, setIsSavingChapter] = useState(false)
   const [pendingSoulDialog, setPendingSoulDialog] = useState({ open: false, summary: "" })
   const deepChapterEnabled = useWikiStore((s) => s.deepChapterEnabled)
@@ -385,6 +386,7 @@ export function ChatPanel() {
   const handleSend = useCallback(
     async (text: string) => {
       // Auto-create a conversation if none is active
+      setDeAiSkillWarningMessage("")
       let convId = useChatStore.getState().activeConversationId
       if (!convId) {
         convId = createConversation()
@@ -1017,8 +1019,13 @@ export function ChatPanel() {
       const conversations = useChatStore.getState().conversations
       // 使用 capturedConvId 而非闭包中的 activeConversationId，防止切换会话后取错会话
       const activeConv = conversations.find(c => c.id === capturedConvId)
-      const skillConfig = await loadDeAiSkillConfig(project?.path ?? null)
-      const effectiveDeAiSkill = resolveEffectiveDeAiSkill(skillConfig, activeConv?.selectedDeAiSkillId)
+      const {
+        skill: effectiveDeAiSkill,
+        warning: deAiSkillWarning,
+      } = await loadEffectiveDeAiSkillSafely(project?.path ?? null, activeConv?.selectedDeAiSkillId)
+      if (deAiSkillWarning) {
+        setDeAiSkillWarningMessage(deAiSkillWarning)
+      }
       if (effectiveDeAiSkill) {
         systemMessages.push({
           role: "system",
@@ -1518,6 +1525,11 @@ export function ChatPanel() {
         )}
 
         <div className="shrink-0 bg-background">
+          {deAiSkillWarningMessage ? (
+            <div className="border-t border-amber-500/20 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+              {deAiSkillWarningMessage}
+            </div>
+          ) : null}
           <ChatInput
             onSend={handleSend}
             onStop={handleStop}
@@ -1528,6 +1540,7 @@ export function ChatPanel() {
                   <ChatDockControls />
                   <DeAiSkillPicker
                     value={activeConversation?.selectedDeAiSkillId}
+                    iconOnly
                     onChange={(skillId) => {
                       const convId = useChatStore.getState().activeConversationId
                       if (convId) setConversationDeAiSkillId(convId, skillId)

@@ -7,10 +7,15 @@ import {
   getAllDeAiSkills,
   isDeAiSkillModified,
   loadDeAiSkillConfig,
+  loadEffectiveDeAiSkillSafely,
   normalizeDeAiSkillConfig,
+  recreateDeAiSkillConfig,
   resetBuiltInDeAiSkill,
+  restoreDeAiSkillConfigFromBackup,
   resolveAvailableDeAiSkills,
   resolveEffectiveDeAiSkill,
+  saveDeAiSkillConfig,
+  setLastChapterDeAiSkill,
   setDeAiSkillEnabled,
   setDefaultDeAiSkill,
   updateDeAiSkill,
@@ -19,11 +24,13 @@ import {
 
 const readFileMock = vi.hoisted(() => vi.fn())
 const writeFileMock = vi.hoisted(() => vi.fn())
+const writeFileAtomicMock = vi.hoisted(() => vi.fn())
 const joinMock = vi.hoisted(() => vi.fn(async (...parts: string[]) => parts.join("/")))
 
 vi.mock("@/commands/fs", () => ({
   readFile: readFileMock,
   writeFile: writeFileMock,
+  writeFileAtomic: writeFileAtomicMock,
 }))
 
 vi.mock("@tauri-apps/api/path", () => ({
@@ -33,6 +40,7 @@ vi.mock("@tauri-apps/api/path", () => ({
 describe("de-ai skill library", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    writeFileAtomicMock.mockResolvedValue(undefined)
   })
 
   it("ships five built-in de-AI skills", () => {
@@ -45,6 +53,62 @@ describe("de-ai skill library", () => {
     ])
   })
 
+  it("gives each built-in skill a dedicated rule section instead of the same base prompt", () => {
+    expect(BUILT_IN_DE_AI_SKILLS.find((skill) => skill.id === "built-in:comprehensive")?.content).toContain(
+      "## 综合去AI味规则",
+    )
+    expect(BUILT_IN_DE_AI_SKILLS.find((skill) => skill.id === "built-in:reduce-explanation")?.content).toContain(
+      "## 减少解释腔规则",
+    )
+    expect(BUILT_IN_DE_AI_SKILLS.find((skill) => skill.id === "built-in:dialogue-natural")?.content).toContain(
+      "## 对话口语化规则",
+    )
+    expect(BUILT_IN_DE_AI_SKILLS.find((skill) => skill.id === "built-in:break-regularity")?.content).toContain(
+      "## 打破工整句式规则",
+    )
+    expect(BUILT_IN_DE_AI_SKILLS.find((skill) => skill.id === "built-in:literary-retain")?.content).toContain(
+      "## 保留文艺感规则",
+    )
+  })
+
+  it("keeps built-in skill prompts materially different from each other", () => {
+    const contents = BUILT_IN_DE_AI_SKILLS.map((skill) => skill.content)
+
+    for (let i = 0; i < contents.length; i += 1) {
+      for (let j = i + 1; j < contents.length; j += 1) {
+        const shorter = Math.min(contents[i].length, contents[j].length)
+        let samePrefix = 0
+        while (samePrefix < shorter && contents[i][samePrefix] === contents[j][samePrefix]) {
+          samePrefix += 1
+        }
+        expect(samePrefix / shorter).toBeLessThan(0.65)
+      }
+    }
+  })
+
+  it("ships professional editing workflows for every built-in skill", () => {
+    for (const skill of BUILT_IN_DE_AI_SKILLS) {
+      expect(skill.content).toContain("## 适用场景")
+      expect(skill.content).toContain("## 诊断步骤")
+      expect(skill.content).toContain("## 改写优先级")
+      expect(skill.content).toContain("## 禁止改法")
+      expect(skill.content.length).toBeGreaterThan(900)
+    }
+  })
+
+  it("keeps every built-in prompt centered on de-AI work instead of generic polishing", () => {
+    for (const skill of BUILT_IN_DE_AI_SKILLS) {
+      expect(skill.content).toContain("## 去AI味核心目标")
+      expect(skill.content).toContain("## AI味识别清单")
+      expect(skill.content).toContain("## 去AI味处理流程")
+      expect(skill.content).toContain("## 反润色约束")
+      expect(skill.content).toContain("## 去AI味输出契约")
+      expect(skill.content.length).toBeGreaterThan(1500)
+      expect((skill.content.match(/去AI味/g) ?? []).length).toBeGreaterThanOrEqual(8)
+      expect((skill.content.match(/AI味/g) ?? []).length).toBeGreaterThanOrEqual(8)
+    }
+  })
+
   it("normalizes an empty config to the built-in comprehensive skill", () => {
     expect(normalizeDeAiSkillConfig(null)).toEqual({
       version: 1,
@@ -52,6 +116,7 @@ describe("de-ai skill library", () => {
       disabledSkillIds: [],
       projectSkills: [],
       builtInSkillOverrides: [],
+      lastChapterDeAiSkillId: null,
     })
   })
 
@@ -175,5 +240,136 @@ describe("de-ai skill library", () => {
       name: "旧版自定义去AI味 Skill",
       content: "legacy rules",
     })
+  })
+
+  it("throws when the json skill config is corrupt instead of falling back and risking overwrite", async () => {
+    readFileMock.mockResolvedValueOnce("{bad json")
+
+    await expect(loadDeAiSkillConfig("C:/project")).rejects.toThrow("技能库配置文件损坏")
+  })
+
+  it("loads the effective skill safely and returns a warning when the config is corrupt", async () => {
+    readFileMock.mockResolvedValueOnce("{bad json")
+
+    const result = await loadEffectiveDeAiSkillSafely("C:/project", "built-in:comprehensive")
+
+    expect(result.skill).toBeNull()
+    expect(result.warning).toBe("去AI味配置损坏，本次未应用去AI味 Skill，请到技能库恢复配置")
+  })
+
+  it("does not set a disabled or unknown skill as default", () => {
+    const config = normalizeDeAiSkillConfig({
+      defaultSkillId: "built-in:comprehensive",
+      disabledSkillIds: ["built-in:dialogue-natural"],
+    })
+
+    expect(setDefaultDeAiSkill(config, "built-in:dialogue-natural").defaultSkillId).toBe("built-in:comprehensive")
+    expect(setDefaultDeAiSkill(config, "missing").defaultSkillId).toBe("built-in:comprehensive")
+    expect(setDefaultDeAiSkill(config, "built-in:reduce-explanation").defaultSkillId).toBe(
+      "built-in:reduce-explanation",
+    )
+  })
+
+  it("persists the last chapter de-AI skill only when it is available", () => {
+    const config = normalizeDeAiSkillConfig({
+      disabledSkillIds: ["built-in:dialogue-natural"],
+    })
+
+    expect(setLastChapterDeAiSkill(config, "built-in:reduce-explanation").lastChapterDeAiSkillId).toBe(
+      "built-in:reduce-explanation",
+    )
+    expect(setLastChapterDeAiSkill(config, "built-in:dialogue-natural").lastChapterDeAiSkillId).toBeNull()
+    expect(setLastChapterDeAiSkill(config, "missing").lastChapterDeAiSkillId).toBeNull()
+  })
+
+  it("backs up the existing json config before saving a new config", async () => {
+    const existing = JSON.stringify(normalizeDeAiSkillConfig({
+      defaultSkillId: "built-in:dialogue-natural",
+    }))
+    const next = normalizeDeAiSkillConfig({
+      defaultSkillId: "built-in:reduce-explanation",
+    })
+    readFileMock.mockResolvedValueOnce(existing)
+
+    await saveDeAiSkillConfig("C:/project", next)
+
+    expect(writeFileMock).toHaveBeenNthCalledWith(1, "C:/project/de-ai-skills.backup.json", existing)
+    expect(writeFileAtomicMock).toHaveBeenCalledWith(
+      "C:/project/de-ai-skills.json",
+      JSON.stringify(next, null, 2),
+    )
+  })
+
+  it("does not use a non-atomic main config write when saving", async () => {
+    readFileMock.mockRejectedValueOnce(new Error("missing json"))
+    const next = normalizeDeAiSkillConfig({
+      defaultSkillId: "built-in:reduce-explanation",
+    })
+
+    await saveDeAiSkillConfig("C:/project", next)
+
+    expect(writeFileMock).not.toHaveBeenCalledWith(
+      "C:/project/de-ai-skills.json",
+      expect.any(String),
+    )
+    expect(writeFileAtomicMock).toHaveBeenCalledWith(
+      "C:/project/de-ai-skills.json",
+      JSON.stringify(next, null, 2),
+    )
+  })
+
+  it("queues concurrent saves for the same project path", async () => {
+    let firstAtomicWriteDone = false
+    let releaseFirstWrite!: () => void
+    readFileMock.mockRejectedValue(new Error("missing json"))
+    writeFileAtomicMock.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releaseFirstWrite = resolve
+      })
+      firstAtomicWriteDone = true
+    })
+    writeFileAtomicMock.mockImplementationOnce(async () => {
+      expect(firstAtomicWriteDone).toBe(true)
+    })
+
+    const first = saveDeAiSkillConfig("C:/project", normalizeDeAiSkillConfig({
+      defaultSkillId: "built-in:reduce-explanation",
+    }))
+    const second = saveDeAiSkillConfig("C:/project", normalizeDeAiSkillConfig({
+      defaultSkillId: "built-in:dialogue-natural",
+    }))
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(writeFileAtomicMock).toHaveBeenCalledTimes(1)
+    releaseFirstWrite()
+    await Promise.all([first, second])
+
+    expect(writeFileAtomicMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("restores the main config file from a valid backup config", async () => {
+    const backup = normalizeDeAiSkillConfig({
+      defaultSkillId: "built-in:dialogue-natural",
+    })
+    readFileMock.mockResolvedValueOnce(JSON.stringify(backup))
+
+    const restored = await restoreDeAiSkillConfigFromBackup("C:/project")
+
+    expect(restored.defaultSkillId).toBe("built-in:dialogue-natural")
+    expect(writeFileAtomicMock).toHaveBeenCalledWith(
+      "C:/project/de-ai-skills.json",
+      JSON.stringify(backup, null, 2),
+    )
+  })
+
+  it("recreates the config file with defaults without reading the corrupt file", async () => {
+    const recreated = await recreateDeAiSkillConfig("C:/project")
+
+    expect(recreated.defaultSkillId).toBe(DEFAULT_DE_AI_SKILL_ID)
+    expect(readFileMock).not.toHaveBeenCalled()
+    expect(writeFileAtomicMock).toHaveBeenCalledWith(
+      "C:/project/de-ai-skills.json",
+      JSON.stringify(normalizeDeAiSkillConfig(null), null, 2),
+    )
   })
 })
