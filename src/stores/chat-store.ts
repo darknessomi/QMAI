@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import type { ChatMessage } from "@/lib/llm-client"
+import type { AgentRunRecord } from "@/lib/agent/types"
 import i18n from "@/i18n"
 
 export interface Conversation {
@@ -25,6 +26,8 @@ export interface DisplayMessage {
   conversationId: string
   references?: MessageReference[]  // pages cited in this response, saved at creation time
   discarded?: boolean
+  agentToolCalls?: AgentRunRecord["toolCalls"]
+  isAgentRunning?: boolean
 }
 
 interface ChatState {

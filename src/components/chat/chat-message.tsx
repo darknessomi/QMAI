@@ -7,7 +7,7 @@ import "katex/dist/katex.min.css"
 import {
   Bot, User, FileText, ChevronDown, ChevronRight, RefreshCw, Copy, Check,
   Users, Lightbulb, BookOpen, HelpCircle, GitMerge, BarChart3, Layout, Globe,
-  Image as ImageIcon,
+  Image as ImageIcon, Loader2,
 } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
 import { readFile } from "@/commands/fs"
@@ -15,6 +15,7 @@ import { normalizePath, getFileName } from "@/lib/path-utils"
 import { refreshProjectState } from "@/lib/project-refresh"
 import { getLastQueryPages } from "@/components/chat/chat-shared"
 import { FileEditPreview } from "@/components/chat/file-edit-preview"
+import { AgentToolCallMessage } from "@/components/chat/agent-tool-call-message"
 import type { DisplayMessage } from "@/stores/chat-store"
 
 import { convertLatexToUnicode } from "@/lib/latex-to-unicode"
@@ -82,7 +83,16 @@ export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode,
           ) : isUser ? (
             <p dir="auto" className="whitespace-pre-wrap break-words">{message.content}</p>
           ) : (
-            <AgentAwareContent content={message.content} projectPath={projectPath} />
+            <>
+              {message.agentToolCalls && message.agentToolCalls.length > 0 && (
+                <AgentToolCallMessage toolCalls={message.agentToolCalls} />
+              )}
+              {message.isAgentRunning && !message.content ? (
+                <AgentThinkingIndicator />
+              ) : (
+                <AgentAwareContent content={message.content} projectPath={projectPath} />
+              )}
+            </>
           )}
         </div>
         {isAssistant && !message.discarded && <CitedReferencesPanel content={message.content} savedReferences={message.references} />}
@@ -546,6 +556,15 @@ export function StreamingMessage({ content }: StreamingMessageProps) {
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+function AgentThinkingIndicator() {
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      <span>正在生成中...</span>
     </div>
   )
 }
