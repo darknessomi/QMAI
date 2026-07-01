@@ -11,10 +11,12 @@ import {
 
 const mocks = vi.hoisted(() => ({
   listDirectory: vi.fn(),
+  readFile: vi.fn(),
 }))
 
 vi.mock("@/commands/fs", () => ({
   listDirectory: mocks.listDirectory,
+  readFile: mocks.readFile,
 }))
 
 type MockNode = {
@@ -35,6 +37,7 @@ function dir(name: string, path = name, children: MockNode[] = []): MockNode {
 describe("reference providers", () => {
   beforeEach(() => {
     mocks.listDirectory.mockReset()
+    mocks.readFile.mockReset()
   })
 
   it("loads chapter markdown files as reference tokens", async () => {
@@ -56,6 +59,38 @@ describe("reference providers", () => {
       },
     ])
     expect(result[0].id).toEqual(expect.any(String))
+  })
+
+  it("uses markdown frontmatter and headings as Chinese display titles", async () => {
+    mocks.listDirectory
+      .mockResolvedValueOnce([
+        dir("1", "C:/Novel/wiki/chapters/1", [
+          file("chapter-010.md", "C:/Novel/wiki/chapters/1/chapter-010.md"),
+        ]),
+      ])
+      .mockResolvedValueOnce([
+        file("canon-facts.md", "C:/Novel/wiki/memory/canon-facts.md"),
+      ])
+    mocks.readFile
+      .mockResolvedValueOnce("---\ntitle: \"第10章-灯下旧影\"\n---\n\n正文")
+      .mockResolvedValueOnce("# 事实记忆\n\n人物与规则")
+
+    await expect(chapterProvider.fetchItems("C:/Novel")).resolves.toMatchObject([
+      {
+        category: "chapter",
+        title: "第10章-灯下旧影",
+        displayTitle: "第10章-灯下旧影",
+        path: "C:/Novel/wiki/chapters/1/chapter-010.md",
+      },
+    ])
+    await expect(memoryProvider.fetchItems("C:/Novel")).resolves.toMatchObject([
+      {
+        category: "memory",
+        title: "事实记忆",
+        displayTitle: "事实记忆",
+        path: "C:/Novel/wiki/memory/canon-facts.md",
+      },
+    ])
   })
 
   it("loads memory, outline, and deduction files from their project folders", async () => {
@@ -94,7 +129,7 @@ describe("reference providers", () => {
     ])
     await expect(memoryProvider.fetchItems("C:/Novel")).resolves.toMatchObject([
       { category: "memory", title: "角色/主角", path: "C:/Novel/wiki/memory/角色/主角.md" },
-      { category: "memory", title: "canon-facts", path: "C:/Novel/wiki/memory/canon-facts.md" },
+      { category: "memory", title: "记忆条目", path: "C:/Novel/wiki/memory/canon-facts.md" },
     ])
   })
 
@@ -109,10 +144,18 @@ describe("reference providers", () => {
         ]),
       ]),
     ])
+    mocks.readFile
+      .mockResolvedValueOnce("---\ntitle: \"旧城坠星框架\"\nshortTitle: \"坠星框架\"\n---\n\n# 旧城坠星框架")
+      .mockResolvedValueOnce(JSON.stringify({
+        report: {
+          createdAt: "2026-07-01T10:00:00.000Z",
+          branches: [{ title: "桥下追逃", recommendation: true }],
+        },
+      }))
 
     await expect(deductionProvider.fetchItems("C:/Novel")).resolves.toMatchObject([
-      { category: "deduction", title: "frameworks/主线框架", path: "C:/Novel/.qmai/simulations/frameworks/主线框架.md" },
-      { category: "deduction", title: "results/framework-1/result-1", path: "C:/Novel/.qmai/simulations/results/framework-1/result-1.json" },
+      { category: "deduction", title: "旧城坠星框架", path: "C:/Novel/.qmai/simulations/frameworks/主线框架.md" },
+      { category: "deduction", title: "推演结果：桥下追逃", path: "C:/Novel/.qmai/simulations/results/framework-1/result-1.json" },
     ])
   })
 

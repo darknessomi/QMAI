@@ -21,6 +21,13 @@ function makeToken(index: number): ReferenceToken {
 }
 
 const chapterItems = Array.from({ length: 11 }, (_, index) => makeToken(index + 1))
+const technicalChapterItem: ReferenceToken = {
+  id: "ref-technical",
+  category: "chapter",
+  title: "1/chapter-010",
+  displayTitle: "第10章-灯下旧影",
+  path: "C:/Novel/wiki/chapters/第10章-灯下旧影.md",
+}
 
 const providers: ReferenceProvider[] = [
   {
@@ -147,6 +154,32 @@ describe("ReferencePickerDialog", () => {
     expect(host.textContent).toContain("章节")
     expect(host.textContent).toContain("记忆库")
     expect(host.textContent).toContain("已选 0/10")
+    expect(host.textContent).not.toMatch(/[📄🧠📋🔬⚡💬📝]/u)
+  })
+
+  it("uses the display title as the visible item name instead of technical file names", async () => {
+    const technicalProviders: ReferenceProvider[] = [
+      {
+        category: "chapter",
+        fetchItems: vi.fn(async () => [technicalChapterItem]),
+      },
+    ]
+
+    await act(async () => {
+      root.render(
+        <ReferencePickerDialog
+          open
+          providers={technicalProviders}
+          projectPath="C:/Novel"
+          onConfirm={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      )
+    })
+    await flush()
+
+    expect(host.textContent).toContain("第10章-灯下旧影")
+    expect(host.textContent).not.toContain("1/chapter-010")
   })
 
   it("does not select more than the maximum reference count", async () => {

@@ -128,7 +128,6 @@ export function ReferencePickerDialog({
                   setSearch("")
                 }}
               >
-                <span className="w-5 text-center" aria-hidden="true">{tab.icon}</span>
                 <span className="truncate">{tab.label}</span>
               </button>
             ))}
@@ -175,7 +174,7 @@ export function ReferencePickerDialog({
                           className="h-4 w-4 accent-primary"
                         />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">{item.title}</span>
+                          <span className="block truncate font-medium">{item.displayTitle || item.title}</span>
                           {item.path ? (
                             <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.path}</span>
                           ) : null}

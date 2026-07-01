@@ -7,12 +7,20 @@
 ## 使用要求
 
 1. 不合并到 main，等待用户完成全面软件测试后再决定合并。
-2. 本分支优先处理 AI 会话面板；AI 大纲不在本轮强接入范围内。
+2. 本分支优先处理 AI 会话面板，并按本轮反馈补齐 AI 大纲 @ 引用输入能力。
 3. 保留旧 `ChatInput` 组件源码，不删除不重构无关逻辑。
 4. 面向用户的提示语保持中文。
 5. 修改完成后必须完成源码启动验证、旧功能测试、构建和便携版打包验证。
 
 ## 本次更新
+
+### 20260701-111236
+
+- 修复 AI 会话输入框重复输入、Enter 无法发送和二次删除触发 `removeChild` 异常的问题：引用输入改为 textarea 承载文本，引用 Chip 单独渲染。
+- 弱化 AI 会话输入框 placeholder 字体颜色，避免与用户实际输入内容混淆。
+- 删除 @ 引用弹窗左侧分类 emoji 图标，仅保留中文分类名，降低 AI 味。
+- @ 引用列表主标题改为读取文件内容中的中文标题：章节、记忆、大纲优先使用 Markdown frontmatter `title` 或一级标题；推演室优先使用框架标题、绑定标题或推荐分支标题。
+- AI 大纲接入同一套 @ 引用输入和引用弹窗，发送时会把已选引用内容读取后加入大纲生成上下文。
 
 ### 20260701-103906
 
@@ -42,6 +50,15 @@
 
 ## 验证记录
 
+- 20260701-111236：
+  - `npm.cmd exec -- vitest run src/components/reference/ReferenceInput.spec.tsx src/components/reference/ReferencePickerDialog.spec.tsx src/lib/reference/providers.spec.ts src/components/sources/outline-chat-panel.spec.tsx`：4 个测试文件、26 个用例通过。
+  - `npm.cmd exec -- vitest run src/components/reference/ReferenceChip.spec.tsx src/components/reference/ReferenceInput.spec.tsx src/components/reference/ReferencePickerDialog.spec.tsx src/lib/reference/providers.spec.ts src/lib/reference/resolve.spec.ts src/stores/chat-store.test.ts src/components/layout/sidebar-panel.outline-tree.test.tsx src/components/chat/chat-panel.spec.tsx src/lib/agent/tools/read-tools.spec.ts src/components/sources/outline-chat-panel.spec.tsx`：10 个测试文件、59 个用例通过。
+  - `npm.cmd exec -- vitest run src/components/chat/agent-message-metadata.spec.ts src/components/chat/chat-message.spec.tsx src/components/layout/knowledge-tree.long-press.test.tsx src/components/layout/chat-layout.test.ts src/components/sources/outline-chat-panel.spec.tsx src/lib/reference/resolve.spec.ts`：6 个测试文件、48 个用例通过。
+  - `npm.cmd run typecheck`：通过。
+  - `npm.cmd run test:mocks`：285 个测试文件、2112 个用例通过。
+  - `npm.cmd run build`：通过，存在既有 Vite chunk/dynamic import 警告。
+  - 源码启动：`npm.cmd run dev -- --host 127.0.0.1 --port 5173` 通过 Job 验证，Vite ready 后已停止。
+  - `npm.cmd run build:portable`：通过，生成 `release-portable\QMaiWrite.exe`。
 - 20260701-103906：
   - `npm.cmd exec -- vitest run src/components/reference/ReferenceChip.spec.tsx src/components/reference/ReferenceInput.spec.tsx src/components/reference/ReferencePickerDialog.spec.tsx src/lib/reference/providers.spec.ts src/stores/chat-store.test.ts src/components/layout/sidebar-panel.outline-tree.test.tsx src/components/chat/chat-panel.spec.tsx src/lib/agent/tools/read-tools.spec.ts`：8 个测试文件、45 个用例通过。
   - `npm.cmd exec -- vitest run src/components/chat/agent-message-metadata.spec.ts src/components/chat/chat-message.spec.tsx src/components/layout/knowledge-tree.long-press.test.tsx src/components/layout/chat-layout.test.ts src/components/sources/outline-chat-panel.spec.tsx src/lib/reference/resolve.spec.ts`：6 个测试文件、46 个用例通过。
@@ -69,4 +86,5 @@
 - 20260701-092043 更新已提交，提交号 `6b08275`。
 - 20260701-095256 优化纳入本次提交。
 - 20260701-103906 回归修复和 @ UI 优化纳入本次提交。
+- 20260701-111236 输入框稳定性、中文标题和 AI 大纲 @ 引用修复纳入本次提交。
 - 不合并 main。

@@ -17,8 +17,19 @@ import { resolveUserVisibleReasoning } from "@/lib/user-visible-reasoning"
 import { runDeepOutlineGeneration } from "@/lib/novel/deep-outline-generation"
 import { resolveModelConfig, resolveNovelModel } from "@/lib/novel/model-resolver"
 import { createDeepThinkingStreamRenderer } from "@/lib/deep-thinking-stream"
-import { ChatInput } from "@/components/chat/chat-input"
 import { ChatModelSelector } from "@/components/chat/chat-model-selector"
+import { ReferenceInput, type InsertReferenceTokens } from "@/components/reference/ReferenceInput"
+import { ReferencePickerDialog } from "@/components/reference/ReferencePickerDialog"
+import {
+  chapterProvider,
+  createChatHistoryProvider,
+  createOutlineHistoryProvider,
+  deductionProvider,
+  memoryProvider,
+  outlineProvider,
+} from "@/lib/reference/providers"
+import type { ReferenceToken } from "@/lib/reference/types"
+import { useChatStore } from "@/stores/chat-store"
 import {
   buildWebResearchContext,
   collectWebResearch,
@@ -58,6 +69,53 @@ async function loadOutlineContext(projectPath: string): Promise<{ context: strin
       } catch { /* skip */ }
     }
   } catch { /* no chapters dir */ }
+
+  return { context: sections.join("\n\n---\n\n"), sources }
+}
+
+function referenceCategoryLabel(category: ReferenceToken["category"]): string {
+  switch (category) {
+    case "chapter":
+      return "章节"
+    case "memory":
+      return "记忆"
+    case "outline":
+      return "大纲"
+    case "deduction":
+      return "推演"
+    case "chat_history":
+      return "AI会话"
+    case "outline_history":
+      return "AI大纲"
+    case "skill":
+      return "技能"
+    default:
+      return "引用"
+  }
+}
+
+async function loadReferenceTokenContext(tokens: ReferenceToken[]): Promise<{ context: string; sources: string[] }> {
+  if (tokens.length === 0) return { context: "", sources: [] }
+
+  const sections: string[] = ["## 本次 @ 引用内容"]
+  const sources: string[] = []
+  for (const token of tokens) {
+    const label = referenceCategoryLabel(token.category)
+    const title = token.title || token.displayTitle
+    sources.push(`@${label}: ${title}`)
+    if (!token.path) {
+      sections.push(`【${label}：${title}】\n该引用没有可直接读取的文件路径。`)
+      continue
+    }
+
+    try {
+      const content = await readFile(token.path)
+      const trimmed = content.length > 3000 ? `${content.slice(0, 3000)}\n...(已截断)` : content
+      sections.push(`【${label}：${title}】\n路径：${token.path}\n\n${trimmed}`)
+    } catch {
+      sections.push(`【${label}：${title}】\n路径：${token.path}\n\n读取失败，已保留引用来源。`)
+    }
+  }
 
   return { context: sections.join("\n\n---\n\n"), sources }
 }
@@ -279,6 +337,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   const llmConfig = useWikiStore((s) => s.llmConfig)
   const novelConfig = useWikiStore((s) => s.novelConfig)
   const providerConfigs = useWikiStore((s) => s.providerConfigs)
+  const chatConversations = useChatStore((s) => s.conversations)
 
   const conversations = useOutlineChatStore((s) => s.conversations)
   const activeConversationId = useOutlineChatStore((s) => s.activeConversationId)
@@ -315,7 +374,26 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   }, [providerConfigs])
 
   const [inputValue, setInputValue] = useState("")
+  const [outlineReferenceTokens, setOutlineReferenceTokens] = useState<ReferenceToken[]>([])
+  const [referencePickerOpen, setReferencePickerOpen] = useState(false)
   const [localModelId, setLocalModelId] = useState(activeConv?.modelId ?? "")
+  const insertReferenceTokensRef = useRef<InsertReferenceTokens>(null)
+
+  const referenceProviders = useMemo(
+    () => [
+      chapterProvider,
+      memoryProvider,
+      outlineProvider,
+      deductionProvider,
+      createChatHistoryProvider(() =>
+        chatConversations.map((conversation) => ({ id: conversation.id, title: conversation.title })),
+      ),
+      createOutlineHistoryProvider(() =>
+        conversations.map((conversation) => ({ id: conversation.id, title: conversation.title })),
+      ),
+    ],
+    [chatConversations, conversations],
+  )
 
   // 加载持久化的历史记录
   useEffect(() => {
@@ -362,9 +440,11 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
     return () => container.removeEventListener("scroll", handleScroll)
   }, [])
 
-  const handleSend = useCallback(async (inputText: string) => {
+  const handleSend = useCallback(async (inputText: string, tokens: ReferenceToken[] = []) => {
     const prompt = inputText.trim()
     if (!prompt || !project || isStreaming) return
+    setInputValue("")
+    setOutlineReferenceTokens([])
     let effectiveLlmConfig = resolveNovelModel(llmConfig, novelConfig, "writing")
     if (activeConv?.modelId) {
       effectiveLlmConfig = resolveModelConfig(activeConv.modelId, effectiveLlmConfig, providerConfigs)
@@ -390,6 +470,11 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       const { context, sources } = await loadOutlineContext(project.path)
       let outlineContext = context
       let outlineSources = [...sources]
+      const referenceContext = await loadReferenceTokenContext(tokens)
+      if (referenceContext.context.trim()) {
+        outlineContext = [outlineContext, referenceContext.context].filter(Boolean).join("\n\n---\n\n")
+      }
+      outlineSources = [...outlineSources, ...referenceContext.sources]
       if (shouldUseWebResearch(prompt)) {
         const webResearch = await collectWebResearch({
           text: prompt,
@@ -721,25 +806,32 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Input */}
-      <div className="shrink-0">
-        <ChatInput
-          onSend={(text) => void handleSend(text)}
+      <div className="shrink-0 border-t px-3 py-2">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <TooltipProvider delay={200}>
+            <div className="qmai-outline-bottom-left-controls flex min-w-0 items-center gap-2">
+              <ChatDockControls />
+              <OutlineGenerationMenu
+                disabled={isStreaming}
+                onGenerate={handleGenerateSection}
+              />
+            </div>
+          </TooltipProvider>
+        </div>
+        <ReferenceInput
+          value={inputValue}
+          tokens={outlineReferenceTokens}
           onStop={handleStop}
           isStreaming={isStreaming}
           placeholder="输入关于大纲的问题..."
-          value={inputValue}
-          onChange={setInputValue}
-          bottomLeftControls={
-            <TooltipProvider delay={200}>
-              <div className="qmai-outline-bottom-left-controls flex min-w-0 items-center gap-2">
-                <ChatDockControls />
-                <OutlineGenerationMenu
-                  disabled={isStreaming}
-                  onGenerate={handleGenerateSection}
-                />
-              </div>
-            </TooltipProvider>
-          }
+          onChange={(text, tokens) => {
+            setInputValue(text)
+            setOutlineReferenceTokens(tokens)
+          }}
+          onTokensChange={setOutlineReferenceTokens}
+          onSubmit={handleSend}
+          onAtTrigger={() => setReferencePickerOpen(true)}
+          insertTokensRef={insertReferenceTokensRef}
           rightControls={
             hasAvailableModels ? (
               <ChatModelSelector
@@ -758,6 +850,16 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
               </p>
             )
           }
+        />
+        <ReferencePickerDialog
+          open={referencePickerOpen}
+          providers={referenceProviders}
+          projectPath={project?.path ? normalizePath(project.path) : ""}
+          onConfirm={(tokens) => {
+            insertReferenceTokensRef.current?.(tokens)
+            setReferencePickerOpen(false)
+          }}
+          onClose={() => setReferencePickerOpen(false)}
         />
       </div>
     </div>

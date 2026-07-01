@@ -17,9 +17,13 @@ const token: ReferenceToken = {
   path: "C:/Novel/wiki/chapters/第一章.md",
 }
 
-function dispatchInput(element: HTMLElement, text: string) {
-  element.textContent = text
-  element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }))
+function dispatchTextareaInput(element: HTMLTextAreaElement, text: string) {
+  const valueSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    "value",
+  )?.set
+  valueSetter?.call(element, text)
+  element.dispatchEvent(new Event("input", { bubbles: true }))
 }
 
 beforeEach(() => {
@@ -49,7 +53,7 @@ describe("ReferenceInput", () => {
       )
     })
 
-    const editor = host.querySelector("[contenteditable='true']") as HTMLElement
+    const editor = host.querySelector("textarea") as HTMLTextAreaElement
     await act(async () => {
       editor.dispatchEvent(new KeyboardEvent("keydown", { key: "@", bubbles: true, cancelable: true }))
     })
@@ -58,6 +62,32 @@ describe("ReferenceInput", () => {
     })
 
     expect(onAtTrigger).toHaveBeenCalledTimes(2)
+  })
+
+  it("uses a controlled textarea editor instead of contentEditable DOM mixing", async () => {
+    const onChange = vi.fn()
+
+    await act(async () => {
+      root.render(
+        <ReferenceInput
+          value="侧例cec"
+          tokens={[token]}
+          onChange={onChange}
+          onSubmit={vi.fn()}
+        />,
+      )
+    })
+
+    expect(host.querySelector("[contenteditable='true']")).toBeNull()
+    const editor = host.querySelector("textarea") as HTMLTextAreaElement
+    expect(editor.value).toBe("侧例cec")
+    expect(host.textContent?.match(/侧例cec/g)).toHaveLength(1)
+
+    await act(async () => {
+      dispatchTextareaInput(editor, "侧例cec2")
+    })
+
+    expect(onChange).toHaveBeenLastCalledWith("侧例cec2", [token])
   })
 
   it("keeps the resize handle and footer controls beside the send button", async () => {
@@ -113,7 +143,7 @@ describe("ReferenceInput", () => {
     const send = host.querySelector<HTMLButtonElement>("[aria-label='发送消息']")
     expect(send?.disabled).toBe(true)
 
-    const editor = host.querySelector("[contenteditable='true']") as HTMLElement
+    const editor = host.querySelector("textarea") as HTMLTextAreaElement
     await act(async () => {
       editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
     })
@@ -128,9 +158,9 @@ describe("ReferenceInput", () => {
       root.render(<ReferenceInput tokens={[token]} onSubmit={onSubmit} />)
     })
 
-    const editor = host.querySelector("[contenteditable='true']") as HTMLElement
+    const editor = host.querySelector("textarea") as HTMLTextAreaElement
     await act(async () => {
-      dispatchInput(editor, "请参考这章")
+      dispatchTextareaInput(editor, "请参考这章")
     })
 
     await act(async () => {
@@ -138,6 +168,40 @@ describe("ReferenceInput", () => {
     })
 
     expect(onSubmit).toHaveBeenCalledWith("请参考这章", [token])
+  })
+
+  it("submits plain text with Enter", async () => {
+    const onSubmit = vi.fn()
+
+    await act(async () => {
+      root.render(<ReferenceInput tokens={[token]} onSubmit={onSubmit} />)
+    })
+
+    const editor = host.querySelector("textarea") as HTMLTextAreaElement
+    await act(async () => {
+      dispatchTextareaInput(editor, "发送这一句")
+    })
+    await act(async () => {
+      editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+    })
+
+    expect(onSubmit).toHaveBeenCalledWith("发送这一句", [token])
+  })
+
+  it("uses a weaker placeholder color than normal input text", async () => {
+    await act(async () => {
+      root.render(
+        <ReferenceInput
+          tokens={[]}
+          onSubmit={vi.fn()}
+          placeholder="请输入写作需求"
+        />,
+      )
+    })
+
+    const editor = host.querySelector("textarea") as HTMLTextAreaElement
+    expect(editor.placeholder).toBe("请输入写作需求")
+    expect(editor.className).toContain("placeholder:text-muted-foreground/60")
   })
 
   it("supports inserting and removing tokens through callbacks", async () => {

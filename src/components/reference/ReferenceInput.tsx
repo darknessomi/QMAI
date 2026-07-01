@@ -51,21 +51,6 @@ function saveInputHeight(height: number) {
   localStorage.setItem(REFERENCE_INPUT_HEIGHT_KEY, String(clampInputHeight(height)))
 }
 
-function extractPlainText(editor: HTMLDivElement | null): string {
-  if (!editor) return ""
-  return Array.from(editor.childNodes)
-    .filter((node) => {
-      if (node.nodeType === Node.TEXT_NODE) return true
-      if (node instanceof HTMLElement) {
-        return !node.hasAttribute("data-reference-id")
-      }
-      return false
-    })
-    .map((node) => node.textContent ?? "")
-    .join("")
-    .replace(/\u00a0/g, " ")
-}
-
 export function ReferenceInput({
   value,
   tokens,
@@ -80,7 +65,7 @@ export function ReferenceInput({
   onAtTrigger,
   insertTokensRef,
 }: ReferenceInputProps) {
-  const editorRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isControlled = value !== undefined
   const [draft, setDraft] = useState("")
   const [inputHeight, setInputHeight] = useState(loadSavedInputHeight)
@@ -109,16 +94,19 @@ export function ReferenceInput({
     insertTokensRef.current = (nextTokens) => {
       if (nextTokens.length === 0) return
       updateTokens([...tokens, ...nextTokens])
-      editorRef.current?.focus()
+      textareaRef.current?.focus()
     }
     return () => {
       insertTokensRef.current = null
     }
   }, [insertTokensRef, tokens, updateTokens])
 
-  const handleInput = useCallback(() => {
-    notifyChange(extractPlainText(editorRef.current), tokens)
-  }, [notifyChange, tokens])
+  const handleTextareaChange = useCallback(
+    (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+      notifyChange(event.target.value, tokens)
+    },
+    [notifyChange, tokens],
+  )
 
   const handleRemoveToken = useCallback(
     (id: string) => {
@@ -134,7 +122,7 @@ export function ReferenceInput({
   }, [inputDisabled, onSubmit, text, tokens])
 
   const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
+    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (isImeComposing(event)) return
 
       if (event.key === "@" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
@@ -223,24 +211,23 @@ export function ReferenceInput({
       </div>
 
       <div className="relative px-3 py-2">
-        <div
-          ref={editorRef}
-          className="overflow-y-auto whitespace-pre-wrap break-words text-sm outline-none disabled:cursor-not-allowed"
+        {tokens.length > 0 ? (
+          <div className="mb-2 flex flex-wrap gap-1">
+            {renderedTokens}
+          </div>
+        ) : null}
+        <textarea
+          ref={textareaRef}
+          value={text}
+          className="w-full resize-none overflow-y-auto bg-transparent px-0 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed disabled:opacity-50"
           style={{ height: inputHeight, maxHeight: inputHeight }}
-          contentEditable={!inputDisabled}
-          suppressContentEditableWarning
-          onInput={handleInput}
+          placeholder={placeholder}
+          disabled={inputDisabled}
+          rows={1}
+          onChange={handleTextareaChange}
           onKeyDown={handleKeyDown}
           aria-label="引用输入框"
-        >
-          {renderedTokens}
-          {text}
-        </div>
-        {!text.trim() && tokens.length === 0 && (
-          <div className="pointer-events-none absolute left-3 top-2 text-sm text-muted-foreground">
-            {placeholder}
-          </div>
-        )}
+        />
       </div>
 
       <div

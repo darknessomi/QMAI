@@ -13,10 +13,19 @@ describe("OutlineChatPanel controls", () => {
     expect(source).not.toContain("text-emerald-700")
   })
 
-  it("moves dock controls into the bottom left toolbar before outline generation and model selection", () => {
-    expect(source).toContain("bottomLeftControls={")
+  it("uses the shared reference input and picker for @ references", () => {
+    expect(source).toContain("ReferenceInput")
+    expect(source).toContain("ReferencePickerDialog")
+    expect(source).toContain("InsertReferenceTokens")
+    expect(source).toContain("outlineReferenceTokens")
+    expect(source).toContain("onAtTrigger={() => setReferencePickerOpen(true)}")
+    expect(source).toContain("onSubmit={handleSend}")
+    expect(source).not.toContain("<ChatInput")
+    expect(source).not.toContain('from "@/components/chat/chat-input"')
+  })
+
+  it("keeps dock controls before outline generation and model selection around the reference input", () => {
     expect(source).toContain("qmai-outline-bottom-left-controls")
-    expect(source).not.toContain("leftControls={")
     expect(source).toContain("<ChatDockControls />")
     expect(source).toContain("<OutlineGenerationMenu")
     expect(source).toContain("<ChatModelSelector")
@@ -38,5 +47,11 @@ describe("OutlineChatPanel controls", () => {
     expect(source).toContain("OUTLINE_SECTION_GENERATION_CONFIGS.map")
     expect(source).toContain("onGenerate(config.title, config.requestHint)")
     expect(source).toContain("onGenerate={handleGenerateSection}")
+  })
+
+  it("adds selected references to the outline model context instead of only storing chips", () => {
+    expect(source).toContain("loadReferenceTokenContext")
+    expect(source).toContain("本次 @ 引用内容")
+    expect(source).toContain("outlineSources = [...outlineSources, ...referenceContext.sources]")
   })
 })

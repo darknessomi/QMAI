@@ -24,17 +24,16 @@ export interface ReferenceToken {
 export interface ReferencePickerTab {
   key: ReferenceCategory
   label: string
-  icon: string
 }
 
 export const REFERENCE_TABS: ReferencePickerTab[] = [
-  { key: "chapter", label: "章节", icon: "📄" },
-  { key: "memory", label: "记忆库", icon: "🧠" },
-  { key: "outline", label: "大纲", icon: "📋" },
-  { key: "deduction", label: "推演室", icon: "🔬" },
-  { key: "skill", label: "技能库", icon: "⚡" },
-  { key: "chat_history", label: "AI对话", icon: "💬" },
-  { key: "outline_history", label: "AI大纲", icon: "📝" },
+  { key: "chapter", label: "章节" },
+  { key: "memory", label: "记忆库" },
+  { key: "outline", label: "大纲" },
+  { key: "deduction", label: "推演室" },
+  { key: "skill", label: "技能库" },
+  { key: "chat_history", label: "AI对话" },
+  { key: "outline_history", label: "AI大纲" },
 ]
 
 export const MAX_REFERENCE_COUNT = 10
