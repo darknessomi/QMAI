@@ -259,3 +259,71 @@ describe("chat-panel chapter plan confirm integration (Stage C)", () => {
     expect(source).toContain('closeChapterPlanDialog({ modify:')
   })
 })
+
+describe("chat-panel post-write check integration (Stage D)", () => {
+  it("imports runPostWriteCheck from the post-write-check-plugin", () => {
+    expect(source).toContain('import { runPostWriteCheck } from "@/lib/agent/plugins/post-write-check-plugin"')
+  })
+
+  it("declares a Stage D block inside the trace-building section", () => {
+    expect(source).toContain("=== Stage D: 写后剧情自检 ===")
+  })
+
+  it("scopes the check to write_chapter and continue_chapter tasks only", () => {
+    const stageDIndex = source.indexOf("=== Stage D: 写后剧情自检 ===")
+    expect(stageDIndex).toBeGreaterThan(-1)
+    const stageDBlock = source.slice(stageDIndex, stageDIndex + 800)
+    expect(stageDBlock).toContain('effectiveTaskRoute.intent === "write_chapter"')
+    expect(stageDBlock).toContain('effectiveTaskRoute.intent === "continue_chapter"')
+    // 不应对 rewrite_chapter 或其他意图触发
+    expect(stageDBlock).not.toContain("rewrite_chapter")
+  })
+
+  it("reads the final assistant content from the store (same as Stage C)", () => {
+    const stageDIndex = source.indexOf("=== Stage D: 写后剧情自检 ===")
+    const stageDBlock = source.slice(stageDIndex, stageDIndex + 800)
+    expect(stageDBlock).toContain("useChatStore.getState()")
+    expect(stageDBlock).toContain("lastAssistant")
+  })
+
+  it("excludes content carrying the chapter_plan marker", () => {
+    const stageDIndex = source.indexOf("=== Stage D: 写后剧情自检 ===")
+    const stageDBlock = source.slice(stageDIndex, stageDIndex + 800)
+    expect(stageDBlock).toContain('chapterContent.includes("chapter_plan")')
+    expect(stageDBlock).toContain("hasChapterPlanMarker")
+  })
+
+  it("skips empty content to avoid false reports", () => {
+    const stageDIndex = source.indexOf("=== Stage D: 写后剧情自检 ===")
+    const stageDBlock = source.slice(stageDIndex, stageDIndex + 1200)
+    expect(stageDBlock).toContain("if (chapterContent && !hasChapterPlanMarker)")
+  })
+
+  it("writes the check result into contextTrace.contextInfo.postWriteCheck", () => {
+    const stageDIndex = source.indexOf("=== Stage D: 写后剧情自检 ===")
+    const stageDBlock = source.slice(stageDIndex, stageDIndex + 1200)
+    expect(stageDBlock).toContain("runPostWriteCheck(chapterContent)")
+    expect(stageDBlock).toContain("postWriteCheck")
+    expect(stageDBlock).toContain("setContextInfo(contextTrace,")
+  })
+
+  it("places Stage D after result protocol and before finishTrace", () => {
+    const traceBlockIndex = source.indexOf("if (contextTrace && effectiveTaskRoute) {")
+    expect(traceBlockIndex).toBeGreaterThan(-1)
+    const traceBlock = source.slice(traceBlockIndex, traceBlockIndex + 2000)
+    const protocolIndex = traceBlock.indexOf("buildResultProtocolTrace")
+    const stageDIndex = traceBlock.indexOf("=== Stage D: 写后剧情自检 ===")
+    const finishIndex = traceBlock.indexOf('finishTrace(contextTrace, "done")')
+    expect(protocolIndex).toBeGreaterThan(-1)
+    expect(stageDIndex).toBeGreaterThan(protocolIndex)
+    expect(finishIndex).toBeGreaterThan(stageDIndex)
+  })
+
+  it("does not block saving: the check only writes to contextTrace, no return or throw", () => {
+    const stageDIndex = source.indexOf("=== Stage D: 写后剧情自检 ===")
+    const stageDBlock = source.slice(stageDIndex, stageDIndex + 800)
+    // 自检结果仅展示，不应阻止后续保存流程
+    expect(stageDBlock).not.toContain("throw ")
+    expect(stageDBlock).not.toContain("return")
+  })
+})

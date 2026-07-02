@@ -92,6 +92,7 @@ import { settleRunningAgentToolCalls } from "@/lib/agent/tool-events"
 import { appendMcpCallTrace } from "@/lib/agent/mcp-trace"
 import { runNovelPrePluginChain } from "@/lib/agent/novel-pre-plugin-chain"
 import { buildInitialContextTraceInfo } from "@/lib/agent/context-trace-builders"
+import { runPostWriteCheck } from "@/lib/agent/plugins/post-write-check-plugin"
 import { buildSelectedSkillsPrompt } from "@/lib/agent/plugins/select-skills-plugin"
 import { buildResultProtocolTrace } from "@/lib/novel/result-parser"
 import { validateChapterBeforeSave } from "@/lib/novel/result-save-guard"
@@ -1112,6 +1113,28 @@ export function ChatPanel() {
               if (finalContent) {
                 const protocolTrace = buildResultProtocolTrace("chapter", finalContent)
                 contextTrace = setContextInfo(contextTrace, { ...traceInfo, resultProtocol: protocolTrace })
+              }
+              // === Stage D: 写后剧情自检 ===
+              // 仅对 write_chapter / continue_chapter 任务触发，避免对普通对话误触发
+              if (
+                effectiveTaskRoute.intent === "write_chapter" ||
+                effectiveTaskRoute.intent === "continue_chapter"
+              ) {
+                // 与 Stage C 一致：从 store 读取最终内容（闭包 assistantMessage 不会随流式更新）
+                const storeState = useChatStore.getState()
+                const lastAssistant = storeState.messages.find(
+                  (m) => m.id === assistantMessage.id && m.role === "assistant",
+                )
+                const chapterContent = lastAssistant?.content ?? ""
+                // 排除含 chapter_plan 标记的内容（计划本身不是正文）与空内容
+                const hasChapterPlanMarker = chapterContent.includes("chapter_plan")
+                if (chapterContent && !hasChapterPlanMarker) {
+                  const postWriteCheck = runPostWriteCheck(chapterContent)
+                  contextTrace = setContextInfo(contextTrace, {
+                    ...contextTrace.contextInfo!,
+                    postWriteCheck,
+                  })
+                }
               }
               contextTrace = finishTrace(contextTrace, "done")
             }
