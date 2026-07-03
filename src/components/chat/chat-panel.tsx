@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from "react"
+import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
-import { BookOpen, Plus, Trash2, MessageSquare, FileEdit, Drama, ListChecks } from "lucide-react"
+import { BookOpen, Plus, Trash2, MessageSquare, FileEdit, Drama, ListChecks, Sparkles, ChevronDown, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -431,6 +432,19 @@ export function ChatPanel() {
     ? conversations.find((conversation) => conversation.id === activeConversationId) ?? null
     : null
 
+  const lastSelectedSkills = useMemo(() => {
+    const assistantMessages = activeMessages.filter(
+      (m) => m.role === "assistant" && m.contextTrace?.contextInfo?.selectedSkills,
+    )
+    if (assistantMessages.length === 0) return []
+    const lastMsg = assistantMessages[assistantMessages.length - 1]
+    return lastMsg.contextTrace?.contextInfo?.selectedSkills ?? []
+  }, [activeMessages])
+
+  const [showSkillsPanel, setShowSkillsPanel] = useState(false)
+  const [expandedSkillId, setExpandedSkillId] = useState<string | null>(null)
+  const skillsPanelRef = useRef<HTMLDivElement | null>(null)
+
   // 当前活跃会话的流式内容
   const streamingContent = activeConversationId ? streamingContents[activeConversationId] ?? "" : ""
   // 当前活跃会话是否正在流式生成
@@ -461,6 +475,9 @@ export function ChatPanel() {
   const [deAiSkillWarningMessage, setDeAiSkillWarningMessage] = useState<string>("")
   const aiWorkflowMode = useWikiStore((s) => s.aiWorkflowMode)
   const setAiWorkflowMode = useWikiStore((s) => s.setAiWorkflowMode)
+  const [workflowModeDropdownOpen, setWorkflowModeDropdownOpen] = useState(false)
+  const workflowModeTriggerRef = useRef<HTMLButtonElement>(null)
+  const [workflowModeDropdownStyle, setWorkflowModeDropdownStyle] = useState<{ left: number; top: number; width: number } | null>(null)
   const planExecuteEnabled = useWikiStore((s) => s.planExecuteEnabled)
   const setPlanExecuteEnabled = useWikiStore((s) => s.setPlanExecuteEnabled)
   const [isSavingChapter, setIsSavingChapter] = useState(false)
@@ -513,6 +530,68 @@ export function ChatPanel() {
       ])
     })
   }, [consumePendingReferenceTokens, createConversation, pendingReferenceTokens])
+
+  useEffect(() => {
+    if (!showSkillsPanel) {
+      setExpandedSkillId(null)
+      return
+    }
+    const handleMouseDown = (event: MouseEvent) => {
+      if (!skillsPanelRef.current?.contains(event.target as Node)) {
+        setShowSkillsPanel(false)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowSkillsPanel(false)
+    }
+    document.addEventListener("mousedown", handleMouseDown)
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [showSkillsPanel])
+
+  useEffect(() => {
+    if (!workflowModeDropdownOpen) {
+      setWorkflowModeDropdownStyle(null)
+      return
+    }
+    const updatePosition = () => {
+      const rect = workflowModeTriggerRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const width = Math.max(rect.width, 100)
+      const top = rect.bottom + 6
+      setWorkflowModeDropdownStyle({
+        left: Math.min(rect.left, window.innerWidth - width - 4),
+        top,
+        width,
+      })
+    }
+    const raf = requestAnimationFrame(updatePosition)
+    window.addEventListener("resize", updatePosition)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener("resize", updatePosition)
+    }
+  }, [workflowModeDropdownOpen])
+
+  useEffect(() => {
+    if (!workflowModeDropdownOpen) return
+    const handleMouseDown = (event: MouseEvent) => {
+      if (workflowModeTriggerRef.current?.contains(event.target as Node)) return
+      setWorkflowModeDropdownOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setWorkflowModeDropdownOpen(false)
+    }
+    document.addEventListener("mousedown", handleMouseDown)
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [workflowModeDropdownOpen])
 
   const agentSystemPrompt = useMemo(
     () =>
@@ -878,6 +957,7 @@ export function ChatPanel() {
               ? [...existingReferences, ...agentReferences]
               : message.references
           })(),
+          contextTrace: contextTrace || message.contextTrace,
           isAgentRunning: false,
         }))
       }
@@ -890,6 +970,7 @@ export function ChatPanel() {
             ? `${message.content}\n\n出错：${error.message}`
             : `出错：${error.message}`,
           agentStages: settleRunningAgentStages(message.agentStages, "error"),
+          contextTrace: contextTrace || message.contextTrace,
           isAgentRunning: false,
         }))
       }
@@ -1441,27 +1522,196 @@ export function ChatPanel() {
                     }}
                   />
                   {novelMode && (
+                    <div ref={skillsPanelRef} className="relative">
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={(
+                            <button
+                              type="button"
+                              onClick={() => setShowSkillsPanel(!showSkillsPanel)}
+                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                              title="当前启用的 Skill"
+                              aria-label="当前启用的 Skill"
+                            >
+                              <Sparkles className="h-4 w-4" />
+                            </button>
+                          )}
+                        >
+                          <TooltipContent side="top" className="leading-5">
+                            {lastSelectedSkills.length > 0
+                              ? `上次生成启用了 ${lastSelectedSkills.length} 个 Skill`
+                              : "暂无启用的 Skill 记录"}
+                          </TooltipContent>
+                        </TooltipTrigger>
+                      </Tooltip>
+                      {showSkillsPanel && (
+                        <div className="fixed left-0 z-50 w-72 rounded-md border bg-popover p-3 text-sm text-popover-foreground shadow-lg"
+                          style={{
+                            left: skillsPanelRef.current?.getBoundingClientRect().left ?? 8,
+                            top: (skillsPanelRef.current?.getBoundingClientRect().bottom ?? 0) + 8,
+                          }}
+                        >
+                          <div className="mb-2 flex items-center gap-2">
+                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-violet-100 text-violet-600 dark:bg-violet-950/40 dark:text-violet-400">
+                              <Sparkles className="h-3.5 w-3.5" />
+                            </div>
+                            <div className="text-sm font-medium">本次启用的 Skill</div>
+                            {lastSelectedSkills.length > 0 && (
+                              <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+                                {lastSelectedSkills.length}
+                              </span>
+                            )}
+                          </div>
+                          {lastSelectedSkills.length === 0 ? (
+                            <div className="py-3 text-center text-xs text-muted-foreground">
+                              暂无启用记录
+                              <div className="mt-1 text-[11px] opacity-70">
+                                发送消息后将显示本次启用的 Skill
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="max-h-96 space-y-1.5 overflow-y-auto">
+                              {lastSelectedSkills.map((skill) => {
+                                const isExpanded = expandedSkillId === skill.id
+                                return (
+                                  <div
+                                    key={skill.id}
+                                    className={`rounded-md border transition-colors ${
+                                      isExpanded
+                                        ? "border-violet-200 bg-violet-50/50 dark:border-violet-800/50 dark:bg-violet-950/20"
+                                        : "bg-background"
+                                    }`}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="flex w-full items-start gap-2 px-2 py-1.5 text-left"
+                                      onClick={() =>
+                                        setExpandedSkillId(isExpanded ? null : skill.id)
+                                      }
+                                    >
+                                      <ChevronDown
+                                        className={`mt-0.5 h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-200 ${
+                                          isExpanded ? "rotate-180" : ""
+                                        }`}
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <div className="mb-1 text-xs font-medium text-foreground">
+                                          {skill.name}
+                                        </div>
+                                        <div className="flex flex-wrap gap-1">
+                                          {[...skill.kind, ...skill.stages, skill.source]
+                                            .filter(Boolean)
+                                            .map((tag, index) => (
+                                              <span
+                                                key={`${skill.id}-${tag}-${index}`}
+                                                className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                                              >
+                                                {tag}
+                                              </span>
+                                            ))}
+                                        </div>
+                                      </div>
+                                    </button>
+                                    <div
+                                      className="grid overflow-hidden transition-all duration-200 ease-in-out"
+                                      style={{
+                                        gridTemplateRows: isExpanded ? "1fr" : "0fr",
+                                      }}
+                                    >
+                                      <div className="min-h-0 overflow-hidden">
+                                        <div className="border-t border-border/50 px-2 py-2">
+                                          {skill.description && (
+                                            <div className="mb-2">
+                                              <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                                                描述
+                                              </div>
+                                              <div className="text-xs leading-relaxed text-foreground/80">
+                                                {skill.description}
+                                              </div>
+                                            </div>
+                                          )}
+                                          {skill.content && (
+                                            <div>
+                                              <div className="mb-1 text-[11px] font-medium text-muted-foreground">
+                                                正文
+                                              </div>
+                                              <div className="max-h-[200px] overflow-y-auto rounded-md bg-background/60 p-2 text-[11px] leading-relaxed text-foreground/70 whitespace-pre-wrap">
+                                                {skill.content}
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {novelMode && (
                     <>
-                      <div
-                        className="flex h-8 shrink-0 items-center rounded-full border bg-background p-0.5"
-                        role="group"
-                        aria-label={aiSessionWorkflowModeLabel}
-                      >
-                        {aiWorkflowModeOptions.map(({ mode, label }) => (
-                          <Button
-                            key={mode}
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            aria-pressed={aiWorkflowMode === mode}
-                            className={`h-7 min-w-10 rounded-full px-2 text-xs ${getWorkflowModeButtonClass(aiWorkflowMode === mode)}`}
-                            onClick={() => setAiWorkflowMode(mode)}
-                            title={`切换到${label}模式`}
-                            aria-label={`切换到${label}模式`}
-                          >
-                            {label}
-                          </Button>
-                        ))}
+                      <div className="relative">
+                        <Button
+                          ref={workflowModeTriggerRef}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          aria-haspopup="listbox"
+                          aria-expanded={workflowModeDropdownOpen}
+                          aria-label={aiSessionWorkflowModeLabel}
+                          className="h-8 shrink-0 rounded-full border px-2.5 text-xs"
+                          onClick={() => setWorkflowModeDropdownOpen(!workflowModeDropdownOpen)}
+                        >
+                          <span className="mr-1">
+                            {aiWorkflowModeOptions.find((o) => o.mode === aiWorkflowMode)?.label ?? "标准"}
+                          </span>
+                          <ChevronDown className={`h-3.5 w-3.5 opacity-50 transition-transform ${workflowModeDropdownOpen ? "rotate-180" : ""}`} />
+                        </Button>
+                        {workflowModeDropdownOpen && workflowModeDropdownStyle && createPortal(
+                          <>
+                            <div
+                              className="fixed inset-0"
+                              style={{ zIndex: 9998 }}
+                              onClick={() => setWorkflowModeDropdownOpen(false)}
+                            />
+                            <div
+                              role="listbox"
+                              className="fixed rounded-md border bg-popover p-1 shadow-md"
+                              style={{
+                                left: workflowModeDropdownStyle.left,
+                                top: workflowModeDropdownStyle.top,
+                                width: workflowModeDropdownStyle.width,
+                                zIndex: 9999,
+                              }}
+                            >
+                              {aiWorkflowModeOptions.map(({ mode, label }) => (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={aiWorkflowMode === mode}
+                                  className="flex w-full items-center gap-2 rounded-sm px-3 py-1.5 text-left text-sm hover:bg-accent"
+                                  onClick={() => {
+                                    setAiWorkflowMode(mode)
+                                    setWorkflowModeDropdownOpen(false)
+                                  }}
+                                >
+                                  <Check
+                                    className={`h-4 w-4 shrink-0 ${
+                                      aiWorkflowMode === mode ? "opacity-100" : "opacity-0"
+                                    }`}
+                                  />
+                                  <span className="flex-1">{label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </>,
+                          document.body,
+                        )}
                       </div>
                       <Tooltip>
                         <TooltipTrigger

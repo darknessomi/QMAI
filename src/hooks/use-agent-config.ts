@@ -3,7 +3,7 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { useChatStore } from "@/stores/chat-store"
 import { useOutlineChatStore } from "@/stores/outline-chat-store"
 import { loadDeAiSkillConfig, type DeAiSkillConfig } from "@/lib/novel/de-ai-skill-library"
-import { loadUserSkillConfig, resolveEnabledWritingSkills } from "@/lib/novel/user-skill-store"
+import { loadAllLinkedSkillsContent, loadUserSkillConfig, resolveEnabledWritingSkills } from "@/lib/novel/user-skill-store"
 import type { UserSkill } from "@/lib/novel/skill-library"
 import { resolveModelConfig } from "@/lib/novel/model-resolver"
 import { runDeepChapterGeneration } from "@/lib/novel/deep-chapter-generation"
@@ -59,6 +59,7 @@ export function useAgentConfig(systemPrompt: string): UseAgentConfigResult {
     Promise.all([
       loadDeAiSkillConfig(projectPath).catch(() => null),
       loadUserSkillConfig(projectPath)
+        .then((config) => loadAllLinkedSkillsContent(config))
         .then(resolveEnabledWritingSkills)
         .catch(() => [] as UserSkill[]),
     ])

@@ -40,24 +40,20 @@ describe("ChatPanel mount 基础设施", () => {
     await view.unmount()
   })
 
-  it("输入工具栏显示快速、标准、严格三档模式，不再显示深度模式按钮", async () => {
+  it("输入工具栏显示模式下拉按钮，不再显示深度模式按钮", async () => {
     const view = await renderChatPanel({ activeConversation: true })
 
-    expect(view.container.textContent).toContain("快速")
     expect(view.container.textContent).toContain("标准")
-    expect(view.container.textContent).toContain("严格")
     expect(view.container.querySelector('[aria-label="开启深度模式"]')).toBeNull()
     expect(view.container.querySelector('[aria-label="关闭深度模式"]')).toBeNull()
 
     await view.unmount()
   })
 
-  it("输入工具栏单独显示计划执行开关，可与三档模式并列使用", async () => {
+  it("输入工具栏单独显示计划执行开关，可与模式下拉按钮并列使用", async () => {
     const view = await renderChatPanel({ activeConversation: true })
 
-    expect(view.container.textContent).toContain("快速")
     expect(view.container.textContent).toContain("标准")
-    expect(view.container.textContent).toContain("严格")
     expect(view.container.textContent).toContain("计划执行")
     expect(view.container.querySelector('[aria-label="开启计划执行模式"]')).not.toBeNull()
 

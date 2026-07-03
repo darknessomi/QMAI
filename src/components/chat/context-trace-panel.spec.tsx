@@ -59,9 +59,11 @@ describe("ContextTracePanel selected skills", () => {
           {
             id: "three-four",
             name: "三翻四抖",
+            description: "",
             kind: ["structure", "planning"],
             stages: ["planning", "drafting"],
             modes: ["standard", "strict"],
+            content: "",
             source: "project",
           },
         ],

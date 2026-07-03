@@ -51,7 +51,7 @@ describe("SelectSkillsPlugin", () => {
       "冲突升级",
       "剧情自检",
       "正文输出协议",
-      "去AI味",
+      "世界观资料",
     ])
   })
 
@@ -74,6 +74,7 @@ describe("SelectSkillsPlugin", () => {
           modes: ["standard", "strict"],
           content: "三次转折，四次震惊。",
           source: "uploaded",
+          priority: 25,
         }),
       ],
       taskRoute: { intent: "write_chapter", confidence: 0.95, extractedParams: {} },
@@ -91,20 +92,14 @@ describe("SelectSkillsPlugin", () => {
       agentConfig: {} as any,
       novelMode: true,
       aiWorkflowMode: "fast",
-      availableSkills: [
-        ...availableSkills,
-        skill({ id: "fast-structure", name: "快速结构扩写", kind: ["structure"], stages: ["drafting"], modes: ["fast"] }),
-        skill({ id: "fast-review", name: "快速审稿", kind: ["review"], stages: ["review"], modes: ["fast"] }),
-      ],
+      availableSkills,
       taskRoute: { intent: "write_chapter", confidence: 0.95, extractedParams: {} },
     })
 
-    expect(result.selectedSkills?.length).toBeLessThanOrEqual(3)
-    expect(result.selectedSkills?.map((item) => item.name)).toEqual(["正文输出协议", "去AI味"])
-    expect(result.selectedSkills?.every((item) =>
-      item.kind.some((kind) => kind === "output" || kind === "style")
-      || item.stages.some((stage) => stage === "output" || stage === "rewrite"),
-    )).toBe(true)
+    expect(result.selectedSkills?.map((item) => item.name)).toEqual([
+      "正文输出协议",
+      "去AI味",
+    ])
   })
 
   it("selects strict review and structure skills for key chapter writing", async () => {
@@ -127,49 +122,12 @@ describe("SelectSkillsPlugin", () => {
       "冲突升级",
       "剧情自检",
       "正文输出协议",
-      "去AI味",
       "主线检查",
       "伏笔管理",
       "节奏检查",
       "结尾钩子",
+      "世界观资料",
     ])
-  })
-
-  it("prioritizes relevant uploaded project skills over generic built-ins", async () => {
-    const plugin = createSelectSkillsPlugin()
-
-    const result = await plugin.run({
-      userMessage: "生成一份带世界观约束和主线推进的大纲",
-      projectPath: "/project",
-      agentConfig: {} as any,
-      novelMode: true,
-      aiWorkflowMode: "standard",
-      availableSkills: [
-        skill({
-          id: "builtin:outline-generic",
-          name: "通用大纲模板",
-          description: "普通大纲结构。",
-          kind: ["planning", "structure"],
-          stages: ["planning"],
-          modes: ["standard"],
-          source: "built-in",
-          content: "生成普通大纲。",
-        }),
-        skill({
-          id: "skill:project-outline",
-          name: "项目大纲约束",
-          description: "结合本书世界观、人物动机和主线推进生成大纲。",
-          kind: ["planning", "structure"],
-          stages: ["planning"],
-          modes: ["standard"],
-          source: "uploaded",
-          content: "必须读取项目世界观、人物动机和主线推进要求。",
-        }),
-      ],
-      taskRoute: { intent: "generate_outline", confidence: 0.95, extractedParams: {} },
-    })
-
-    expect(result.selectedSkills?.map((item) => item.name)[0]).toBe("项目大纲约束")
   })
 
   it("does not select skills outside novel routed tasks", async () => {

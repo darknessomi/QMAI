@@ -1,6 +1,6 @@
 import { readFile, writeFile, writeFileAtomic } from "@/commands/fs"
 import { join } from "@tauri-apps/api/path"
-import type { UserSkill } from "@/lib/novel/skill-library"
+import { DEFAULT_SKILL_PRIORITY, type UserSkill } from "@/lib/novel/skill-library"
 
 export type DeAiSkillSource = "built-in" | "project" | "legacy"
 
@@ -598,6 +598,9 @@ export function deAiSkillToUserSkill(skill: DeAiSkill): UserSkill {
     modes: ["fast", "standard", "strict"],
     content: skill.content,
     source: skill.source === "built-in" ? "built-in" : "project",
+    priority: DEFAULT_SKILL_PRIORITY,
+    tags: [],
+    categoryId: "",
     createdAt: skill.createdAt,
     updatedAt: skill.updatedAt,
   }

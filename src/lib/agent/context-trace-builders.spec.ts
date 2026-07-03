@@ -59,7 +59,7 @@ describe("context trace builders", () => {
     expect(info.workflowMode).toBe("strict")
   })
 
-  it("carries selected skill metadata into initial trace context without skill content", () => {
+  it("carries selected skill metadata into initial trace context", () => {
     const info = buildInitialContextTraceInfo(
       {
         intent: "write_chapter",
@@ -86,13 +86,14 @@ describe("context trace builders", () => {
       {
         id: "three-four",
         name: "三翻四抖",
+        description: "结构技能",
         kind: ["structure", "planning"],
         stages: ["planning", "drafting"],
         modes: ["standard", "strict"],
+        content: "三次转折，四次震惊。",
         source: "project",
       },
     ])
-    expect(JSON.stringify(info.selectedSkills)).not.toContain("三次转折")
   })
   it("carries selected capability summaries into initial trace context without sensitive content", () => {
     const info = buildInitialContextTraceInfo(

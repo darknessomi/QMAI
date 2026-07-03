@@ -34,10 +34,12 @@ export interface TraceContextBudget {
 export interface TraceSelectedSkill {
   id: string
   name: string
+  description: string
   kind: SkillKind[]
   stages: SkillStage[]
   modes: SkillMode[]
-  source: "built-in" | "project" | "uploaded"
+  content: string
+  source: "built-in" | "project" | "uploaded" | "linked"
 }
 
 export interface TraceWebSearch {

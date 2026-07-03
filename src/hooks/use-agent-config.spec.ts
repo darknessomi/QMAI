@@ -314,6 +314,7 @@ describe("useAgentConfig", () => {
         version: 1,
         selectedSkillId: "skill:three",
         disabledSkillIds: ["skill:hidden"],
+        categories: [],
         skills: [
           {
             id: "skill:three",
@@ -324,6 +325,9 @@ describe("useAgentConfig", () => {
             modes: ["standard", "strict"],
             content: "每章设置三次局势变化和四次信息冲击。",
             source: "uploaded",
+            priority: 50,
+            tags: [],
+            categoryId: "",
           },
           {
             id: "skill:hidden",
@@ -334,6 +338,9 @@ describe("useAgentConfig", () => {
             modes: ["strict"],
             content: "不要进入 AI 会话。",
             source: "uploaded",
+            priority: 50,
+            tags: [],
+            categoryId: "",
           },
         ],
       },

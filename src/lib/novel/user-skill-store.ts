@@ -1,7 +1,8 @@
-﻿import { readFile, writeFileAtomic } from "@/commands/fs"
-import { join } from "@tauri-apps/api/path"
+import { readFile, writeFileAtomic, listDirectory } from "@/commands/fs"
+import { join, basename, extname } from "@tauri-apps/api/path"
 import {
   normalizeUserSkill,
+  type SkillCategory,
   type SkillKind,
   type SkillMode,
   type SkillStage,
@@ -16,6 +17,7 @@ export interface UserSkillConfig {
   selectedSkillId: string | null
   disabledSkillIds: string[]
   skills: UserSkill[]
+  categories: SkillCategory[]
 }
 
 function uniqueStrings(values: unknown): string[] {
@@ -31,14 +33,31 @@ function uniqueStrings(values: unknown): string[] {
   return result
 }
 
+function normalizeSkillCategory(value: unknown): SkillCategory | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Partial<SkillCategory>
+  if (typeof raw.id !== "string" || !raw.id.trim()) return null
+  if (typeof raw.name !== "string" || !raw.name.trim()) return null
+  return {
+    id: raw.id.trim(),
+    name: raw.name.trim(),
+    createdAt: typeof raw.createdAt === "number" ? raw.createdAt : undefined,
+    updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : undefined,
+  }
+}
+
 function normalizeWritingSkill(value: unknown): UserSkill | null {
   if (!value || typeof value !== "object") return null
   const raw = value as Partial<UserSkill>
   if (typeof raw.name !== "string" || !raw.name.trim()) return null
-  if (typeof raw.content !== "string" || !raw.content.trim()) return null
+  const isLinked = raw.source === "linked"
+  if (!isLinked) {
+    if (typeof raw.content !== "string" || !raw.content.trim()) return null
+  }
   return normalizeUserSkill({
     ...raw,
-    source: raw.source === "built-in" ? "built-in" : "uploaded",
+    source: raw.source === "built-in" ? "built-in" : raw.source === "linked" ? "linked" : "uploaded",
+    content: typeof raw.content === "string" ? raw.content : "",
   })
 }
 
@@ -50,15 +69,27 @@ export function normalizeUserSkillConfig(value: unknown): UserSkillConfig {
       .filter((skill): skill is UserSkill => Boolean(skill))
       .filter((skill, index, all) => all.findIndex((item) => item.id === skill.id) === index)
     : []
-  const skillIds = new Set(skills.map((skill) => skill.id))
+  const categories = Array.isArray(raw.categories)
+    ? raw.categories
+      .map(normalizeSkillCategory)
+      .filter((cat): cat is SkillCategory => Boolean(cat))
+      .filter((cat, index, all) => all.findIndex((item) => item.id === cat.id) === index)
+    : []
+  const categoryIds = new Set(categories.map((cat) => cat.id))
+  const normalizedSkills = skills.map((skill) => ({
+    ...skill,
+    categoryId: skill.categoryId && categoryIds.has(skill.categoryId) ? skill.categoryId : "",
+  }))
+  const skillIds = new Set(normalizedSkills.map((skill) => skill.id))
   const selectedSkillId = typeof raw.selectedSkillId === "string" && skillIds.has(raw.selectedSkillId)
     ? raw.selectedSkillId
-    : skills[0]?.id ?? null
+    : normalizedSkills[0]?.id ?? null
   return {
     version: 1,
     selectedSkillId,
     disabledSkillIds: uniqueStrings(raw.disabledSkillIds),
-    skills,
+    skills: normalizedSkills,
+    categories,
   }
 }
 
@@ -96,10 +127,193 @@ export function createBlankWritingSkill(config: UserSkillConfig, now = Date.now(
   })
 }
 
+export function importWritingSkill(
+  config: UserSkillConfig,
+  params: { name: string; content: string; description?: string },
+  now = Date.now(),
+): UserSkillConfig {
+  const { name, content, description } = params
+  const trimmedName = name.trim()
+  const trimmedContent = content.trim()
+  if (!trimmedName || !trimmedContent) return config
+
+  const skill = normalizeUserSkill({
+    id: `skill:${now}`,
+    name: trimmedName,
+    description: description?.trim() ?? "",
+    kind: ["style", "structure"],
+    stages: ["planning", "drafting"],
+    modes: ["standard", "strict"],
+    content: trimmedContent,
+    source: "uploaded",
+    createdAt: now,
+    updatedAt: now,
+  })
+  return normalizeUserSkillConfig({
+    ...config,
+    selectedSkillId: skill.id,
+    skills: [skill, ...config.skills],
+  })
+}
+
+function isFileByPath(path: string): boolean {
+  const lower = path.toLowerCase()
+  return lower.endsWith(".md") || lower.endsWith(".txt") || lower.endsWith(".json")
+}
+
+function parseFrontmatter(content: string): { name?: string; description?: string; body: string } {
+  const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/)
+  if (!match) {
+    return { body: content }
+  }
+  const yamlBlock = match[1]
+  const nameMatch = yamlBlock.match(/^name:\s*(.+?)\s*$/m)
+  const descMatch = yamlBlock.match(/^description:\s*(.+?)\s*$/m)
+  return {
+    name: nameMatch ? nameMatch[1].trim() : undefined,
+    description: descMatch ? descMatch[1].trim() : undefined,
+    body: content.slice(match[0].length),
+  }
+}
+
+export async function importLinkedSkill(
+  config: UserSkillConfig,
+  folderOrFilePath: string,
+): Promise<UserSkillConfig> {
+  const now = Date.now()
+  const isFile = isFileByPath(folderOrFilePath)
+  let name = ""
+  let description = ""
+
+  if (isFile) {
+    const fileName = await basename(folderOrFilePath)
+    const ext = await extname(folderOrFilePath)
+    name = fileName.slice(0, fileName.length - ext.length)
+    try {
+      const content = await readFile(folderOrFilePath)
+      const parsed = parseFrontmatter(content)
+      if (parsed.name) {
+        name = parsed.name
+      }
+      if (parsed.description) {
+        description = parsed.description
+      }
+    } catch {
+    }
+  } else {
+    const folderName = await basename(folderOrFilePath)
+    name = folderName
+    try {
+      const skillMdPath = await join(folderOrFilePath, "SKILL.md")
+      const content = await readFile(skillMdPath)
+      const parsed = parseFrontmatter(content)
+      if (parsed.name) {
+        name = parsed.name
+      }
+      if (parsed.description) {
+        description = parsed.description
+      }
+    } catch {
+    }
+  }
+
+  const skill = normalizeUserSkill({
+    id: `skill:${now}`,
+    name: name || "未命名 Skill",
+    description,
+    content: "",
+    source: "linked",
+    linkedPath: folderOrFilePath,
+    priority: 50,
+    tags: [],
+    categoryId: "",
+    createdAt: now,
+    updatedAt: now,
+  })
+
+  return normalizeUserSkillConfig({
+    ...config,
+    selectedSkillId: skill.id,
+    skills: [skill, ...config.skills],
+  })
+}
+
+export async function loadLinkedSkillContent(skill: UserSkill): Promise<string> {
+  if (skill.source !== "linked" || !skill.linkedPath) {
+    return skill.content
+  }
+
+  const linkedPath = skill.linkedPath
+  const isFile = isFileByPath(linkedPath)
+
+  try {
+    if (isFile) {
+      return await readFile(linkedPath)
+    }
+
+    const skillMdPath = await join(linkedPath, "SKILL.md")
+    let content = await readFile(skillMdPath)
+
+    try {
+      const docsPath = await join(linkedPath, "docs")
+      const files = await listDirectory(docsPath)
+      const mdFiles = files.filter((f) => f.name.toLowerCase().endsWith(".md") && !f.is_dir)
+      if (mdFiles.length > 0) {
+        const docContents: string[] = []
+        for (const file of mdFiles) {
+          const filePath = await join(docsPath, file.name)
+          try {
+            const docContent = await readFile(filePath)
+            docContents.push(docContent)
+          } catch {
+          }
+        }
+        if (docContents.length > 0) {
+          content += `\n---\n# 附加文档\n---\n\n${docContents.join("\n\n---\n\n")}`
+        }
+      }
+    } catch {
+    }
+
+    return content
+  } catch {
+    return ""
+  }
+}
+
+export async function loadAllLinkedSkillsContent(config: UserSkillConfig): Promise<UserSkillConfig> {
+  const linkedSkills = config.skills.filter((s) => s.source === "linked")
+  if (linkedSkills.length === 0) {
+    return config
+  }
+
+  const contents = await Promise.all(
+    linkedSkills.map((skill) => loadLinkedSkillContent(skill))
+  )
+
+  const contentMap = new Map<string, string>()
+  linkedSkills.forEach((skill, index) => {
+    contentMap.set(skill.id, contents[index])
+  })
+
+  const updatedSkills = config.skills.map((skill) => {
+    const content = contentMap.get(skill.id)
+    if (content !== undefined) {
+      return { ...skill, content }
+    }
+    return skill
+  })
+
+  return {
+    ...config,
+    skills: updatedSkills,
+  }
+}
+
 export function updateWritingSkill(
   config: UserSkillConfig,
   skillId: string,
-  patch: Partial<Pick<UserSkill, "name" | "description" | "kind" | "stages" | "modes" | "content">>,
+  patch: Partial<Pick<UserSkill, "name" | "description" | "kind" | "stages" | "modes" | "content" | "priority" | "tags" | "categoryId">>,
   now = Date.now(),
 ): UserSkillConfig {
   return normalizeUserSkillConfig({
@@ -110,10 +324,27 @@ export function updateWritingSkill(
           ...skill,
           ...patch,
           id: skill.id,
-          source: "uploaded",
+          source: skill.source,
           updatedAt: now,
         })
         : skill,
+    ),
+  })
+}
+
+export function touchSkillUsage(
+  config: UserSkillConfig,
+  skillId: string,
+  now = Date.now(),
+): UserSkillConfig {
+  const skill = config.skills.find((s) => s.id === skillId)
+  if (!skill || skill.source === "built-in") return config
+  return normalizeUserSkillConfig({
+    ...config,
+    skills: config.skills.map((s) =>
+      s.id === skillId
+        ? normalizeUserSkill({ ...s, updatedAt: now })
+        : s,
     ),
   })
 }
@@ -138,6 +369,88 @@ export function deleteWritingSkill(config: UserSkillConfig, skillId: string): Us
     selectedSkillId: config.selectedSkillId === skillId ? skills[0]?.id ?? null : config.selectedSkillId,
     disabledSkillIds: config.disabledSkillIds.filter((id) => id !== skillId),
     skills,
+  })
+}
+
+export function createSkillCategory(
+  config: UserSkillConfig,
+  name: string,
+  now = Date.now(),
+): UserSkillConfig {
+  const trimmedName = name.trim()
+  if (!trimmedName) return config
+  const category: SkillCategory = {
+    id: `cat:${now}`,
+    name: trimmedName,
+    createdAt: now,
+    updatedAt: now,
+  }
+  return normalizeUserSkillConfig({
+    ...config,
+    categories: [...config.categories, category],
+  })
+}
+
+export function renameSkillCategory(
+  config: UserSkillConfig,
+  categoryId: string,
+  newName: string,
+  now = Date.now(),
+): UserSkillConfig {
+  const trimmedName = newName.trim()
+  if (!trimmedName) return config
+  return normalizeUserSkillConfig({
+    ...config,
+    categories: config.categories.map((cat) =>
+      cat.id === categoryId
+        ? { ...cat, name: trimmedName, updatedAt: now }
+        : cat,
+    ),
+  })
+}
+
+export function deleteSkillCategory(
+  config: UserSkillConfig,
+  categoryId: string,
+): UserSkillConfig {
+  const skills = config.skills.map((skill) =>
+    skill.categoryId === categoryId
+      ? { ...skill, categoryId: "" }
+      : skill,
+  )
+  return normalizeUserSkillConfig({
+    ...config,
+    skills,
+    categories: config.categories.filter((cat) => cat.id !== categoryId),
+  })
+}
+
+export function reorderSkillCategories(
+  config: UserSkillConfig,
+  fromIndex: number,
+  toIndex: number,
+): UserSkillConfig {
+  const categories = [...config.categories]
+  const [moved] = categories.splice(fromIndex, 1)
+  categories.splice(toIndex, 0, moved)
+  return normalizeUserSkillConfig({
+    ...config,
+    categories,
+  })
+}
+
+export function moveSkillToCategory(
+  config: UserSkillConfig,
+  skillId: string,
+  categoryId: string,
+): UserSkillConfig {
+  return normalizeUserSkillConfig({
+    ...config,
+    skills: config.skills.map((skill) =>
+      skill.id === skillId
+        ? { ...skill, categoryId }
+        : skill,
+    ),
   })
 }
 
@@ -175,6 +488,49 @@ export function ensureBuiltinSkills(config: UserSkillConfig): UserSkillConfig {
     ...config,
     skills: [...missing, ...config.skills],
   });
+}
+
+export function exportSkillToJson(skill: UserSkill): string {
+  const data = {
+    "qmai-skill": true,
+    version: 1,
+    name: skill.name,
+    description: skill.description,
+    kind: skill.kind,
+    stages: skill.stages,
+    modes: skill.modes,
+    content: skill.content,
+    priority: skill.priority,
+    tags: skill.tags,
+  }
+  return JSON.stringify(data, null, 2)
+}
+
+export function importSkillFromJson(jsonStr: string): UserSkill | null {
+  try {
+    const parsed = JSON.parse(jsonStr)
+    if (!parsed || typeof parsed !== "object") return null
+    const raw = parsed as Record<string, unknown>
+    if (typeof raw.name !== "string" || !raw.name.trim()) return null
+    if (typeof raw.content !== "string" || !raw.content.trim()) return null
+    const now = Date.now()
+    return normalizeUserSkill({
+      id: `skill:${now}`,
+      name: raw.name,
+      description: typeof raw.description === "string" ? raw.description : "",
+      kind: Array.isArray(raw.kind) ? raw.kind : undefined,
+      stages: Array.isArray(raw.stages) ? raw.stages : undefined,
+      modes: Array.isArray(raw.modes) ? raw.modes : undefined,
+      content: raw.content,
+      source: "uploaded",
+      priority: typeof raw.priority === "number" ? raw.priority : undefined,
+      tags: Array.isArray(raw.tags) ? raw.tags : undefined,
+      createdAt: now,
+      updatedAt: now,
+    })
+  } catch {
+    return null
+  }
 }
 
 export const WRITING_SKILL_KIND_OPTIONS: SkillKind[] = [

@@ -18,6 +18,13 @@ export type SkillStage =
 
 export type SkillMode = AiWorkflowMode
 
+export interface SkillCategory {
+  id: string
+  name: string
+  createdAt?: number
+  updatedAt?: number
+}
+
 export interface UserSkill {
   id: string
   name: string
@@ -26,10 +33,16 @@ export interface UserSkill {
   stages: SkillStage[]
   modes: SkillMode[]
   content: string
-  source: "built-in" | "project" | "uploaded"
+  source: "built-in" | "project" | "uploaded" | "linked"
+  linkedPath?: string
+  priority: number
+  tags: string[]
+  categoryId: string
   createdAt?: number
   updatedAt?: number
 }
+
+export const DEFAULT_SKILL_PRIORITY = 50
 
 export interface SkillFilter {
   mode?: SkillMode
@@ -93,7 +106,17 @@ function uniqueValid<T extends string>(values: unknown, valid: Set<T>, fallback:
 }
 
 export function normalizeUserSkill(value: Partial<UserSkill>): UserSkill {
-  const source = value.source === "built-in" || value.source === "uploaded" ? value.source : "project"
+  const source = value.source === "built-in" || value.source === "uploaded" || value.source === "linked" ? value.source : "project"
+  const rawPriority = typeof value.priority === "number" ? value.priority : DEFAULT_SKILL_PRIORITY
+  const priority = Math.max(1, Math.min(100, Math.round(rawPriority)))
+  const rawTags = Array.isArray(value.tags) ? value.tags : []
+  const tags: string[] = []
+  for (const tag of rawTags) {
+    if (typeof tag === "string") {
+      const trimmed = tag.trim()
+      if (trimmed && !tags.includes(trimmed)) tags.push(trimmed)
+    }
+  }
   return {
     id: typeof value.id === "string" && value.id.trim() ? value.id.trim() : `project:${Date.now()}`,
     name: typeof value.name === "string" && value.name.trim() ? value.name.trim() : "未命名 Skill",
@@ -103,6 +126,10 @@ export function normalizeUserSkill(value: Partial<UserSkill>): UserSkill {
     modes: uniqueValid(value.modes, VALID_MODES, ["standard", "strict"]),
     content: typeof value.content === "string" ? value.content.trim() : "",
     source,
+    linkedPath: source === "linked" && typeof value.linkedPath === "string" ? value.linkedPath : undefined,
+    priority,
+    tags,
+    categoryId: typeof value.categoryId === "string" ? value.categoryId : "",
     createdAt: typeof value.createdAt === "number" ? value.createdAt : undefined,
     updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : undefined,
   }

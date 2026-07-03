@@ -21,9 +21,11 @@ export function buildInitialContextTraceInfo(
     selectedSkills: prePluginResult?.selectedSkills?.map((skill) => ({
       id: skill.id,
       name: skill.name,
+      description: skill.description,
       kind: skill.kind,
       stages: skill.stages,
       modes: skill.modes,
+      content: skill.content,
       source: skill.source,
     })),
     selectedCapabilities: prePluginResult?.selectedCapabilities?.map((capability) => ({
