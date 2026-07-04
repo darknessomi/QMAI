@@ -62,7 +62,7 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
     if (!project) return
     await refreshProjectFileTree(project.path, {
       projectId: project.id,
-      clearDisplayTreeFirst: true,
+      clearDisplayTreeFirst: false,
     })
   }, [project])
 

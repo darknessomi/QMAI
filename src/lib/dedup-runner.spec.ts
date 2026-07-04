@@ -1,4 +1,5 @@
 import { beforeEach, expect, test, vi } from "vitest"
+import type { LlmConfig } from "@/stores/wiki-store"
 import type { FileNode } from "@/types/wiki"
 
 vi.mock("@/commands/fs", () => ({
@@ -22,6 +23,17 @@ import {
   runDuplicateDetection,
 } from "./dedup-runner"
 import type { EntitySummary } from "./dedup"
+
+const testLlmConfig: LlmConfig = {
+  provider: "openai",
+  model: "gpt-4",
+  apiKey: "test",
+  ollamaUrl: "http://localhost:11434",
+  customEndpoint: "",
+  maxContextSize: 204800,
+  reasoning: { mode: "auto" },
+  localCliIsolation: false,
+}
 
 const mockedListDirectory = vi.mocked(listDirectory)
 const mockedReadFile = vi.mocked(readFile)
@@ -187,7 +199,7 @@ test("runDuplicateDetection returns scannedPageCount and skips disk when summari
 
   const result = await runDuplicateDetection(
     "/Project",
-    { provider: "openai", model: "gpt-4", apiKey: "test" },
+    testLlmConfig,
     { summaries },
   )
 
@@ -211,7 +223,7 @@ test("runDuplicateDetection short-circuits when fewer than two summaries", async
 
   const result = await runDuplicateDetection(
     "/Project",
-    { provider: "openai", model: "gpt-4", apiKey: "test" },
+    testLlmConfig,
     { summaries },
   )
 
@@ -230,7 +242,7 @@ test("runDuplicateDetection invokes onProgress for loading and detecting", async
 
   await runDuplicateDetection(
     "/Project",
-    { provider: "openai", model: "gpt-4", apiKey: "test" },
+    testLlmConfig,
     {
       onProgress: (stage) => {
         stages.push(stage)

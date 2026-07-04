@@ -1248,11 +1248,9 @@ fn build_tree(
         .map_err(|e| format!("Failed to read directory '{}': {}", dir.display(), e))?
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .map(|n| entry_is_visible(n, include_hidden))
-                .unwrap_or(false)
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
+            entry_is_visible(&name, include_hidden)
         })
         .collect();
 

@@ -22,6 +22,7 @@ import type { WikiProject } from "@/types/wiki"
 import { applyTheme, watchSystemTheme } from "@/lib/theme-utils"
 import { applyUiFontFamily } from "@/lib/font-settings"
 import { applyVisualStyle } from "@/lib/visual-style-settings"
+import { normalizePath } from "@/lib/path-utils"
 
 function App() {
   const project = useWikiStore((s) => s.project)
@@ -39,7 +40,8 @@ function App() {
 
   function isCurrentProject(proj: WikiProject): boolean {
     const current = useWikiStore.getState().project
-    return current?.id === proj.id && current.path === proj.path
+    if (!current || current.id !== proj.id) return false
+    return normalizePath(current.path) === normalizePath(proj.path)
   }
 
   async function hydrateProjectSideStores(proj: WikiProject): Promise<void> {
@@ -98,9 +100,11 @@ function App() {
 
   async function hydrateProjectBackgroundServices(proj: WikiProject): Promise<void> {
     if (!isTauri()) return
+    if (!isCurrentProject(proj)) return
 
     try {
       const { restoreQueue } = await import("@/lib/ingest-queue")
+      if (!isCurrentProject(proj)) return
       await restoreQueue(proj.id, proj.path)
     } catch (err) {
       console.error("恢复摄取队列失败:", err)
@@ -132,6 +136,14 @@ function App() {
     } catch (err) {
       console.error("配置项目文件同步失败:", err)
     }
+  }
+
+  async function hydrateDeferredProjectState(proj: WikiProject): Promise<void> {
+    await hydrateProjectBackgroundServices(proj)
+    if (!isCurrentProject(proj)) return
+    await hydrateScheduledImportAfterOpen(proj)
+    if (!isCurrentProject(proj)) return
+    await hydrateProjectSideStores(proj)
   }
 
   useEffect(() => {
@@ -352,14 +364,15 @@ function App() {
 
     // 自动打开最后阅读的章节和AI会话窗口
     try {
-      const lastChapterPath = await loadLastReadChapter()
-      if (!isCurrentProject(proj)) return
-      if (lastChapterPath) {
-        const normalizedPath = lastChapterPath.replace(/\\/g, "/")
-        if (normalizedPath.includes("/wiki/chapters/")) {
-          const exists = await fileExists(lastChapterPath)
-          if (exists && isCurrentProject(proj)) {
-            setSelectedFile(lastChapterPath)
+      if (isCurrentProject(proj)) {
+        const lastChapterPath = await loadLastReadChapter()
+        if (isCurrentProject(proj) && lastChapterPath) {
+          const normalizedPath = lastChapterPath.replace(/\\/g, "/")
+          if (normalizedPath.includes("/wiki/chapters/")) {
+            const exists = await fileExists(lastChapterPath)
+            if (exists && isCurrentProject(proj)) {
+              setSelectedFile(lastChapterPath)
+            }
           }
         }
       }
@@ -371,9 +384,7 @@ function App() {
     }
 
     // 文件树由 AppLayout 通过 refreshProjectFileTree 加载；重队列/定时导入/审查/聊天后置 hydration。
-    void hydrateProjectBackgroundServices(proj)
-    void hydrateScheduledImportAfterOpen(proj)
-    void hydrateProjectSideStores(proj)
+    void hydrateDeferredProjectState(proj)
   }
 
   async function handleSelectRecent(proj: WikiProject) {
