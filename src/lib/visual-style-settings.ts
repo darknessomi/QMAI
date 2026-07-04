@@ -7,7 +7,7 @@ export type VisualStyle =
   | "yuebai"
   | "gumo"
 
-export const DEFAULT_VISUAL_STYLE: VisualStyle = "classic"
+export const DEFAULT_VISUAL_STYLE: VisualStyle = "cangzhu"
 export const VISUAL_STYLE_STORAGE_KEY = "qmai-visual-style"
 
 const VISUAL_STYLE_CLASSES: Record<Exclude<VisualStyle, "classic">, string> = {

@@ -8,9 +8,9 @@ describe("visual-style-settings", () => {
     document.documentElement.className = ""
   })
 
-  it("falls back to classic for invalid values", () => {
-    expect(normalizeVisualStyle("bad")).toBe("classic")
-    expect(normalizeVisualStyle(null)).toBe("classic")
+  it("falls back to cangzhu for invalid values", () => {
+    expect(normalizeVisualStyle("bad")).toBe("cangzhu")
+    expect(normalizeVisualStyle(null)).toBe("cangzhu")
   })
 
   it("accepts all oriental visual styles", () => {
