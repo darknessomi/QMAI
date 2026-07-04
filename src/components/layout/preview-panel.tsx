@@ -52,6 +52,7 @@ import {
   type ChapterSelectionAction,
 } from "@/lib/chapter-selection"
 import { shouldApplyDiskToEditor } from "@/lib/editor-disk-sync"
+import { registerEditorDiskSyncHandler } from "@/lib/editor-disk-sync-session"
 
 const SnapshotViewer = lazy(async () => {
   const mod = await import("@/components/novel/snapshot-viewer")
@@ -126,6 +127,10 @@ function formatWritingBodyWithIndent(markdown: string): string {
 
 function normalizeChapterWriting(markdown: string): string {
   return formatWritingBodyWithIndent(syncChapterFrontmatterTitle(markdown))
+}
+
+function getDiskSyncNormalize(path: string): (content: string) => string {
+  return isChapterPath(path) ? normalizeChapterWriting : (content) => content
 }
 
 function updateChapterHeading(markdown: string, nextTitle: string): string {
@@ -228,6 +233,7 @@ export function PreviewPanel() {
   const [chapterToolbarCompact, setChapterToolbarCompact] = useState(true)
   const [chapterToolbarMoreOpen, setChapterToolbarMoreOpen] = useState(false)
   const [loadedFilePath, setLoadedFilePath] = useState<string | null>(null)
+  const [diskSyncEpoch, setDiskSyncEpoch] = useState(0)
   // Snapshot of what was most recently loaded from disk. Milkdown re-emits
   // `markdownUpdated` on initial parse (before the user types anything),
   // which used to trigger an auto-save that could write back a placeholder
@@ -271,12 +277,14 @@ export function PreviewPanel() {
     const editorContent = wikiEditorRef.current?.getCurrentMarkdown() ?? fileContentRef.current
     const lastLoaded = lastLoadedByPathRef.current.get(normalizedPath) ?? lastLoadedRef.current
     const hasPendingSave = saveTimerRef.current != null
+    const normalize = getDiskSyncNormalize(normalizedPath)
 
     if (!shouldApplyDiskToEditor({
       lastLoaded,
       editorContent,
       diskContent,
       hasPendingSave,
+      normalize,
     })) {
       return false
     }
@@ -285,6 +293,7 @@ export function PreviewPanel() {
     fileContentRef.current = diskContent
     if (selectedFileRef.current && normalizePath(selectedFileRef.current) === normalizedPath) {
       setFileContent(diskContent)
+      setDiskSyncEpoch((epoch) => epoch + 1)
     }
     return true
   }, [rememberLoadedChapter, setFileContent])
@@ -293,6 +302,11 @@ export function PreviewPanel() {
     const path = selectedFileRef.current
     if (!path) return
     await applyDiskSyncIfSafe(path)
+  }, [applyDiskSyncIfSafe])
+
+  useEffect(() => {
+    registerEditorDiskSyncHandler(applyDiskSyncIfSafe)
+    return () => registerEditorDiskSyncHandler(null)
   }, [applyDiskSyncIfSafe])
 
   useEffect(() => {
@@ -460,13 +474,22 @@ export function PreviewPanel() {
     if (category !== "markdown" || isBinary(category)) return
 
     const normalizedPath = normalizePath(selectedFile)
-    const tick = () => {
+    const syncNow = () => {
       if (normalizePath(selectedFileRef.current ?? "") !== normalizedPath) return
       void applyDiskSyncIfSafe(normalizedPath)
     }
 
-    const intervalId = setInterval(tick, 2000)
-    return () => clearInterval(intervalId)
+    const intervalId = setInterval(syncNow, 2000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") syncNow()
+    }
+    window.addEventListener("focus", syncNow)
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      clearInterval(intervalId)
+      window.removeEventListener("focus", syncNow)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
   }, [selectedFile, applyDiskSyncIfSafe])
 
   useEffect(() => {
@@ -494,31 +517,33 @@ export function PreviewPanel() {
       const generation = saveGenerationRef.current
       saveTimerRef.current = setTimeout(() => {
         void (async () => {
-          if (generation !== saveGenerationRef.current) return
-          if (pathAtSave !== selectedFileRef.current) return
-          if (normalizePath(pathAtSave) !== normalizedPath) return
-
-          let diskContent: string
           try {
-            diskContent = await readFile(normalizedPath)
-          } catch (err) {
-            console.error("保存前读取磁盘失败:", err)
-            return
-          }
+            if (generation !== saveGenerationRef.current) return
+            if (pathAtSave !== selectedFileRef.current) return
+            if (normalizePath(pathAtSave) !== normalizedPath) return
 
-          const currentLastLoaded = lastLoadedByPathRef.current.get(normalizedPath) ?? lastLoadedRef.current
-          const normalize = isChapterPath(normalizedPath) ? normalizeChapterWriting : (content: string) => content
-          if (normalize(diskContent) !== normalize(currentLastLoaded)) {
-            void applyDiskSyncIfSafe(normalizedPath)
-            return
-          }
+            let diskContent: string
+            try {
+              diskContent = await readFile(normalizedPath)
+            } catch (err) {
+              console.error("保存前读取磁盘失败:", err)
+              return
+            }
 
-          try {
+            const currentLastLoaded = lastLoadedByPathRef.current.get(normalizedPath) ?? lastLoadedRef.current
+            const normalize = getDiskSyncNormalize(normalizedPath)
+            if (normalize(diskContent) !== normalize(currentLastLoaded)) {
+              await applyDiskSyncIfSafe(normalizedPath)
+              return
+            }
+
             await writeFileAtomic(pathAtSave, persistedMarkdown)
             rememberLoadedChapter(normalizedPath, persistedMarkdown)
             bumpDataVersion()
           } catch (err) {
             console.error("保存失败:", err)
+          } finally {
+            saveTimerRef.current = null
           }
         })()
       }, 1000)
@@ -1555,7 +1580,7 @@ export function PreviewPanel() {
         {category === "markdown" ? (
           <WikiEditor
             ref={wikiEditorRef}
-            key={selectedFile}
+            key={`${selectedFile}:${diskSyncEpoch}`}
             content={fileContent}
             onSave={handleSave}
             defaultMode={inferEditorMode(selectedFile)}

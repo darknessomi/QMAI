@@ -44,4 +44,19 @@ describe("editor-disk-sync", () => {
       diskContent: DISK_V1,
     })).toBe(false)
   })
+
+  it("ignores formatting-only drift when normalize matches", () => {
+    const normalize = (content: string) => content.trim()
+    expect(hasUnsavedLocalEdits({
+      lastLoaded: "hello",
+      editorContent: " hello ",
+      normalize,
+    })).toBe(false)
+    expect(shouldApplyDiskToEditor({
+      lastLoaded: "hello",
+      editorContent: " hello ",
+      diskContent: "world",
+      normalize,
+    })).toBe(true)
+  })
 })

@@ -20,6 +20,7 @@ import {
   isIngestableSourcePath,
 } from "@/lib/source-lifecycle"
 import { isPathAllowedBySourceWatch, normalizeSourceWatchConfig } from "@/lib/source-watch-config"
+import { requestEditorDiskSyncIfSafe } from "@/lib/editor-disk-sync-session"
 
 let unlistenQueue: UnlistenFn | null = null
 let unlistenChanged: UnlistenFn | null = null
@@ -141,7 +142,7 @@ async function processFileChangeBatch(
   await refreshAfterFileChanges(project, paths)
 }
 
-async function refreshAfterFileChanges(project: WikiProject, _relativePaths: string[]): Promise<void> {
+async function refreshAfterFileChanges(project: WikiProject, relativePaths: string[]): Promise<void> {
   const pp = normalizePath(project.path)
   try {
     const tree = await listDirectory(pp)
@@ -151,6 +152,16 @@ async function refreshAfterFileChanges(project: WikiProject, _relativePaths: str
   }
 
   useWikiStore.getState().bumpDataVersion()
+
+  const selected = useWikiStore.getState().selectedFile
+    ? normalizePath(useWikiStore.getState().selectedFile!)
+    : null
+  if (!selected) return
+
+  const selectedRel = selected.startsWith(`${pp}/`) ? selected.slice(pp.length + 1) : selected
+  if (!relativePaths.includes(selectedRel)) return
+
+  await requestEditorDiskSyncIfSafe(selected)
 }
 
 async function enqueueRawSourceChanges(project: WikiProject, tasks: FileChangeTask[]): Promise<void> {
