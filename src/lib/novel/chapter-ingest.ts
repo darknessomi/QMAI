@@ -345,7 +345,6 @@ export async function ingestChapter(
       snapshot.validationWarnings = []
       snapshot.entityIsNew = {}
     }
-    await saveSnapshot(pp, snapshot)
     await saveChapterIngestOutput(pp, snapshot, {
       title: typeof fm.title === "string" ? fm.title : undefined,
     })
@@ -365,16 +364,9 @@ export async function ingestChapter(
     }
   }
 
-  if (snapshot) {
-    try {
-      const writtenPaths = await writeSnapshotToWiki(pp, snapshot)
-      if (writtenPaths.length > 0) {
-        console.log(`[Chapter Ingest] Wrote ${writtenPaths.length} entity pages from snapshot`)
-      }
-    } catch (err) {
-      console.warn("[Chapter Ingest] Entity page write failed:", err instanceof Error ? err.message : err)
-    }
+  const syncResult = await syncSnapshotToMemory(pp, snapshot)
 
+  if (snapshot) {
     try {
       const patchPath = `${pp}/.novel/chapter-ingest-output/${String(snapshot.chapterNumber).padStart(3, "0")}.wiki-patch.json`
       const patchJson = await readFile(patchPath)
@@ -382,126 +374,12 @@ export async function ingestChapter(
       const patchPaths = await writePatchFieldsToWiki(pp, patch)
       if (patchPaths.length > 0) {
         console.log(`[Chapter Ingest] Wrote ${patchPaths.length} entity pages from wiki patch fields`)
+        useWikiStore.getState().bumpDataVersion()
       }
     } catch (err) {
       console.warn("[Chapter Ingest] Wiki patch fields write failed:", err instanceof Error ? err.message : err)
     }
   }
-
-  if (snapshot && snapshot.knowledgeChanges.length > 0) {
-    try {
-      const existing = await loadCognitionState(pp) ?? emptyCognitionState()
-      const updated = mergeCognitionFromSnapshot(existing, snapshot)
-      await saveCognitionState(pp, updated)
-    } catch (err) {
-      console.warn("[Chapter Ingest] Cognition state update failed:", err instanceof Error ? err.message : err)
-    }
-  }
-
-  if (snapshot && snapshot.characterStateChanges.length > 0) {
-    try {
-      const existingChars = await loadCharacterStates(pp)
-      for (const change of snapshot.characterStateChanges) {
-        const colonIdx = change.indexOf(":")
-        if (colonIdx > 0) {
-          const charName = change.slice(0, colonIdx).trim()
-          const changeDesc = change.slice(colonIdx + 1).trim()
-          const existing = existingChars.characters.find(c => c.characterName === charName)
-          if (existing) {
-            existing.status = changeDesc
-            existing.lastUpdatedChapter = snapshot.chapterNumber
-            existing.lastUpdatedAt = new Date().toISOString()
-          } else {
-            existingChars.characters.push({
-              characterName: charName,
-              currentLocation: "",
-              status: changeDesc,
-              equipment: [],
-              abilities: [],
-              relationships: {},
-              lastUpdatedChapter: snapshot.chapterNumber,
-              lastUpdatedAt: new Date().toISOString(),
-            })
-          }
-        } else {
-          const matched = existingChars.characters.find(c => change.includes(c.characterName))
-          if (matched) {
-            matched.status = change
-            matched.lastUpdatedChapter = snapshot.chapterNumber
-            matched.lastUpdatedAt = new Date().toISOString()
-          }
-        }
-      }
-      existingChars.lastUpdated = new Date().toISOString()
-      await saveCharacterStates(pp, existingChars)
-    } catch (err) {
-      console.warn("[Chapter Ingest] Character state update failed:", err instanceof Error ? err.message : err)
-    }
-  }
-
-  if (snapshot && snapshot.foreshadowingChanges.length > 0) {
-    try {
-      const existingForeshadows = await loadForeshadowingTracker(pp)
-      for (const change of snapshot.foreshadowingChanges) {
-        const trimmed = change.trim()
-        if (trimmed.startsWith("新增伏笔") || trimmed.startsWith("新增:")) {
-          const content = trimmed.replace(/^(新增伏笔|新增)[:：]?\s*/, "")
-          const dashIdx = content.indexOf("-")
-          const name = dashIdx > 0 ? content.slice(0, dashIdx).trim() : content.trim()
-          const desc = dashIdx > 0 ? content.slice(dashIdx + 1).trim() : ""
-          const newForeshadow: Foreshadowing = {
-            id: `fs-${snapshot.chapterNumber}-${existingForeshadows.items.length + 1}`,
-            name,
-            description: desc,
-            status: "planted",
-            plantedChapter: snapshot.chapterNumber,
-            advancedChapters: [],
-            relatedCharacters: [],
-            relatedEvents: [],
-            notes: "",
-          }
-          existingForeshadows.items.push(newForeshadow)
-        } else if (trimmed.startsWith("推进伏笔") || trimmed.startsWith("推进:")) {
-          const content = trimmed.replace(/^(推进伏笔|推进)[:：]?\s*/, "").trim()
-          const matched = existingForeshadows.items.find(
-            f => f.name === content || content.includes(f.name) || f.name.includes(content)
-          )
-          if (matched) {
-            matched.status = "advanced"
-            if (!matched.advancedChapters.includes(snapshot.chapterNumber)) {
-              matched.advancedChapters.push(snapshot.chapterNumber)
-            }
-          }
-        } else if (trimmed.startsWith("回收伏笔") || trimmed.startsWith("回收:")) {
-          const content = trimmed.replace(/^(回收伏笔|回收)[:：]?\s*/, "").trim()
-          const matched = existingForeshadows.items.find(
-            f => f.name === content || content.includes(f.name) || f.name.includes(content)
-          )
-          if (matched) {
-            matched.status = "resolved"
-            matched.resolvedChapter = snapshot.chapterNumber
-          }
-        }
-      }
-      existingForeshadows.lastUpdated = new Date().toISOString()
-      await saveForeshadowingTracker(pp, existingForeshadows)
-    } catch (err) {
-      console.warn("[Chapter Ingest] Foreshadowing update failed:", err instanceof Error ? err.message : err)
-    }
-  }
-
-  if (snapshot) {
-    try {
-      const memoryPaths = await exportStructuredMemoryToWiki(pp, snapshot)
-      if (memoryPaths.length > 0) {
-        console.log(`[Chapter Ingest] Wrote ${memoryPaths.length} structured memory pages`)
-      }
-    } catch (err) {
-      console.warn("[Chapter Ingest] Structured memory export failed:", err instanceof Error ? err.message : err)
-    }
-  }
-
-  const syncResult = await syncSnapshotToMemory(pp, snapshot)
 
   // 社区摘要定期重建
   if (snapshot && shouldRebuildCommunitySummaries(snapshot.chapterNumber, novelConfig)) {
