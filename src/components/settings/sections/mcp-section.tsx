@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { Plus, Trash2 } from "lucide-react"
+import { Plus, Trash2, Loader2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,6 +13,14 @@ import {
   type McpServerConfig,
 } from "@/lib/mcp/config"
 import { buildMcpRuntime } from "@/lib/mcp/runtime"
+import { RealMcpConnector } from "@/lib/mcp/real-connector"
+
+interface TestState {
+  loading: boolean
+  status: "ok" | "error" | null
+  toolCount: number
+  message: string
+}
 
 export function McpSection() {
   const { t } = useTranslation()
@@ -21,6 +29,7 @@ export function McpSection() {
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({})
   const [toolJsonDrafts, setToolJsonDrafts] = useState<Record<string, string>>({})
+  const [testStates, setTestStates] = useState<Record<string, TestState>>({})
   const runtime = useMemo(() => buildMcpRuntime(mcpConfig), [mcpConfig])
 
   async function persist(next: McpConfig) {
@@ -78,6 +87,49 @@ export function McpSection() {
       delete next[serverId]
       return next
     })
+    setTestStates((prev) => {
+      const next = { ...prev }
+      delete next[serverId]
+      return next
+    })
+  }
+
+  async function testConnection(server: McpServerConfig) {
+    if (!server.enabled) {
+      setTestStates((prev) => ({
+        ...prev,
+        [server.id]: { loading: false, status: "error", toolCount: 0, message: t("settings.sections.mcp.testNotAllowed") },
+      }))
+      return
+    }
+    if (!server.command?.trim()) {
+      setTestStates((prev) => ({
+        ...prev,
+        [server.id]: { loading: false, status: "error", toolCount: 0, message: t("settings.sections.mcp.testNeedCommand") },
+      }))
+      return
+    }
+    setTestStates((prev) => ({
+      ...prev,
+      [server.id]: { loading: true, status: null, toolCount: 0, message: "" },
+    }))
+    const connector = new RealMcpConnector({ servers: [server] })
+    try {
+      const result = await connector.testConnection(server.id)
+      setTestStates((prev) => ({
+        ...prev,
+        [server.id]: {
+          loading: false,
+          status: result.status,
+          toolCount: result.toolCount,
+          message: result.status === "ok"
+            ? t("settings.sections.mcp.testOk", { count: result.toolCount })
+            : result.message,
+        },
+      }))
+    } finally {
+      await connector.closeAll().catch(() => undefined)
+    }
   }
 
   function updateToolsFromJson(server: McpServerConfig, value: string) {
@@ -191,6 +243,54 @@ export function McpSection() {
                   <Label>{t("settings.sections.mcp.serverName")}</Label>
                   <Input value={server.name} onChange={(event) => updateServer(server.id, { name: event.target.value })} />
                 </div>
+              </div>
+
+              <div className="mt-3 space-y-1.5">
+                <Label>{t("settings.sections.mcp.startup")}</Label>
+                <Input
+                  value={server.command ?? ""}
+                  onChange={(event) => updateServer(server.id, { command: event.target.value || undefined })}
+                  placeholder={t("settings.sections.mcp.startupPlaceholder")}
+                />
+                <p className="text-xs text-muted-foreground">{t("settings.sections.mcp.startupHint")}</p>
+              </div>
+
+              <div className="mt-3 space-y-1.5">
+                <Label>{t("settings.sections.mcp.startupArgs")}</Label>
+                <Input
+                  value={(server.args ?? []).join(" ")}
+                  onChange={(event) => {
+                    const args = event.target.value.trim() ? event.target.value.trim().split(/\s+/) : undefined
+                    updateServer(server.id, { args })
+                  }}
+                  placeholder={t("settings.sections.mcp.startupArgsHint")}
+                />
+                <p className="text-xs text-muted-foreground">{t("settings.sections.mcp.startupArgsHint")}</p>
+              </div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={testStates[server.id]?.loading}
+                  onClick={() => testConnection(server)}
+                >
+                  {testStates[server.id]?.loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : null}
+                  {testStates[server.id]?.loading
+                    ? t("settings.sections.mcp.testing")
+                    : t("settings.sections.mcp.testConnection")}
+                </Button>
+                {testStates[server.id]?.status === "ok" ? (
+                  <span className="text-xs text-emerald-600">{testStates[server.id]?.message}</span>
+                ) : null}
+                {testStates[server.id]?.status === "error" ? (
+                  <span className="text-xs text-destructive">
+                    {t("settings.sections.mcp.testFail")}：{testStates[server.id]?.message}
+                  </span>
+                ) : null}
               </div>
 
               <div className="mt-3 space-y-1.5">

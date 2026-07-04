@@ -674,7 +674,7 @@
       },
       "mcp": {
         "title": "MCP 工具",
-        "description": "配置 AI 会话可以看见的 MCP 工具描述。当前阶段只保存配置和做运行时预检，不启动外部 MCP 进程。",
+        "description": "配置 AI 会话可以看见的 MCP 工具。填写启动命令后可真实连接外部 MCP 服务；未填命令时仅做本地预检。",
         "addSample": "添加示例图谱 MCP",
         "summary": "已配置 {{servers}} 个 MCP 服务，当前可启用 {{tools}} 个工具，{{capabilities}} 个 AI 能力。",
         "saved": "已保存",
@@ -689,7 +689,18 @@
         "toolsJson": "工具描述 JSON",
         "toolsJsonHint": "填写 MCP 工具 descriptor 数组。删除和覆盖类工具会在运行时被阻断。",
         "invalidJson": "工具描述 JSON 格式错误",
-        "invalidTools": "工具描述必须是 MCP 工具数组"
+        "invalidTools": "工具描述必须是 MCP 工具数组",
+        "startup": "启动命令",
+        "startupHint": "填写后可真实连接该 MCP 服务。Windows 上建议填 npx/uvx 等，会自动用 cmd /c 包装。",
+        "startupPlaceholder": "例如 npx（留空则仅本地预检）",
+        "startupArgs": "启动参数",
+        "startupArgsHint": "空格分隔，例如 -y @modelcontextprotocol/server-memory",
+        "testConnection": "测试连接",
+        "testing": "连接中…",
+        "testOk": "连接成功，发现 {{count}} 个可用工具。",
+        "testFail": "连接失败",
+        "testNeedCommand": "请先填写启动命令",
+        "testNotAllowed": "请先启用该 MCP 服务"
       },
       "sourceWatch": {
         "title": "资料文件夹自动监控",

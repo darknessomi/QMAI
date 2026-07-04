@@ -62,6 +62,13 @@ export class JsonRpcClient {
     return response.result
   }
 
+  async notify(method: string, params?: Record<string, unknown>): Promise<void> {
+    const notification = params === undefined
+      ? { jsonrpc: "2.0", method }
+      : { jsonrpc: "2.0", method, params }
+    await this.transport.send(JSON.stringify(notification))
+  }
+
   async close(): Promise<void> {
     await this.transport.close()
   }

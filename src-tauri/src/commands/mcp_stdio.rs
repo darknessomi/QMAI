@@ -39,6 +39,28 @@ fn suppress_windows_console(_cmd: &mut Command) {
     }
 }
 
+/// Windows 上把 `command args...` 包装为 `cmd /c command args...`，
+/// 让 cmd 解析 PATH 与 .cmd/.bat 后缀，避免 tokio Command::new 对 npx/uvx 启动 ENOENT。
+/// 如果 command 本身就是 cmd/cmd.exe，则不重复包装。
+#[cfg(windows)]
+fn build_windows_command(command: &str, args: Option<&[String]>) -> Command {
+    let lower = command.to_ascii_lowercase();
+    let is_cmd = lower == "cmd" || lower == "cmd.exe";
+    if is_cmd {
+        let mut cmd = Command::new(command);
+        if let Some(args) = args {
+            cmd.args(args);
+        }
+        return cmd;
+    }
+    let mut cmd = Command::new("cmd");
+    cmd.arg("/c").arg(command);
+    if let Some(args) = args {
+        cmd.args(args);
+    }
+    cmd
+}
+
 #[tauri::command]
 pub async fn mcp_stdio_spawn(
     state: State<'_, McpStdioState>,
@@ -49,12 +71,19 @@ pub async fn mcp_stdio_spawn(
         return Err("MCP 启动失败：命令不能为空".to_string());
     }
 
+    // Windows 上 tokio Command::new 不经 shell，直接填 npx/uvx 等 PATH 命令会 ENOENT。
+    // 参考 modelcontextprotocol/servers 官方建议：Windows 用 cmd /c 包装，
+    // 让 cmd 负责解析 PATH 与 .cmd/.bat 后缀。非 Windows 平台保持原行为。
+    #[cfg(windows)]
+    let mut cmd = build_windows_command(command, options.args.as_deref());
+    #[cfg(not(windows))]
     let mut cmd = Command::new(command);
     suppress_windows_console(&mut cmd);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
 
+    #[cfg(not(windows))]
     if let Some(args) = options.args {
         cmd.args(args);
     }
@@ -165,4 +194,34 @@ pub async fn mcp_stdio_kill(
         .await
         .map_err(|e| format!("MCP 关闭失败：{e}"))?;
     Ok(())
+}
+
+#[cfg(windows)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_windows_command_npx_is_wrapped() {
+        let _cmd = build_windows_command("npx", Some(&[
+            "-y".to_string(),
+            "@modelcontextprotocol/server-memory".to_string(),
+        ]));
+        // builds without panic — the returned Command is ready for spawn.
+    }
+
+    #[test]
+    fn test_build_windows_command_cmd_itself_not_wrapped() {
+        let _cmd = build_windows_command("cmd", Some(&["/c".to_string(), "echo".to_string()]));
+    }
+
+    #[test]
+    fn test_build_windows_command_cmd_exe_not_wrapped() {
+        let _cmd = build_windows_command("cmd.exe", Some(&["/c".to_string(), "dir".to_string()]));
+    }
+
+    #[test]
+    fn test_build_windows_command_no_args() {
+        let _cmd = build_windows_command("npx", None);
+    }
 }
