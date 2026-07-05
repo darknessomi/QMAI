@@ -36,4 +36,12 @@
 - 创建本说明文件。
 - 完成需求梳理与方案选型（共 8 轮问答）。
 - 写出设计文档 `juqingjiaoyan-设计文档.md`。
-- 状态：未提交 git，未开始代码实现，等待用户审阅设计文档后再进入实现规划。
+
+### 20260705-Task1~5 实现
+
+- 实现 `draft-review-skill.ts`（loadReviewEvidence / identifyDeviations / runDraftReviewSkill）
+- 实现 4 类硬偏差检测：角色认知 / 角色状态 / 上一章承接 / 伏笔冲突
+- 实现 LLM 修复 + 重校循环（最多 2 轮）
+- 完整测试覆盖（527 行）
+- 提交 git -> `7d7702f`
+- 基于此分支创建 worktree 隔离新分支 `jiaoyanjixu`（目录：`C:/QMAI_C/worktrees/jiaoyanjixu`）
