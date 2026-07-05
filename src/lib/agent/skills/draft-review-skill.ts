@@ -102,3 +102,89 @@ export async function loadReviewEvidence(
     rawLoadError,
   };
 }
+
+let _nextId = 1;
+function nextDeviationId(): string {
+  return "dev-cog-" + String(_nextId++);
+}
+
+function findMatchingCharacter(draft: string, character: string): boolean {
+  return draft.includes(character);
+}
+
+const COGNITION_LEAK_PATTERNS = [
+  "知道",
+  "知道了",
+  "得知了",
+  "察觉到",
+  "意识到",
+  "已经知道了",
+];
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findLocation(draft: string, character: string): string {
+  const lines = draft.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(character)) {
+      return "第 " + String(i + 1) + " 行";
+    }
+  }
+  return "第 1 行";
+}
+
+export function identifyDeviations(
+  draft: string,
+  evidence: ReviewEvidence,
+): Deviation[] {
+  const { cognition } = evidence;
+  if (!cognition) return [];
+
+  const deviations: Deviation[] = [];
+
+  for (const cc of cognition.characters) {
+    const { character, doesNotKnow } = cc;
+    if (!findMatchingCharacter(draft, character)) continue;
+
+    for (const unknown of doesNotKnow) {
+      const pattern = COGNITION_LEAK_PATTERNS.some((kw) => {
+        const sentencePattern = new RegExp(
+          escapeRegex(character) +
+            "[^。！？\\n]{0,50}" +
+            escapeRegex(kw) +
+            "[^。！？\\n]{0,50}" +
+            escapeRegex(unknown),
+        );
+        if (sentencePattern.test(draft)) return true;
+
+        const reversePattern = new RegExp(
+          escapeRegex(unknown) +
+            "[^。！？\\n]{0,50}" +
+            escapeRegex(kw) +
+            "[^。！？\\n]{0,50}" +
+            escapeRegex(character),
+        );
+        if (reversePattern.test(draft)) return true;
+
+        return false;
+      });
+
+      if (!pattern) continue;
+
+      deviations.push({
+        id: nextDeviationId(),
+        type: "cognition",
+        location: findLocation(draft, character),
+        originalText: character + "提及了 " + unknown,
+        expected: character + "不知道" + unknown,
+        memoryEvidence:
+          "记忆中心记录：" + character + " 不知道\u300C" + unknown + "\u300D",
+        severity: "high",
+      });
+    }
+  }
+
+  return deviations;
+}

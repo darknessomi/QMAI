@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  identifyDeviations,
   loadReviewEvidence,
   type Deviation,
   type DraftReviewInput,
@@ -161,5 +162,64 @@ describe("loadReviewEvidence", () => {
     const evidence = await loadReviewEvidence("/proj");
     expect(evidence.rawLoadError).toBe(true);
     expect(evidence.cognition).toBeNull();
+  });
+});
+
+describe("identifyDeviations - 角色认知偏差", () => {
+  it("角色说出了 doesNotKnow 里的信息 → 标 high 偏差", () => {
+    const evidence: ReviewEvidence = {
+      cognition: {
+        characters: [
+          { character: "李雷", knows: [], doesNotKnow: ["暗杀计划"] },
+        ],
+        readerKnows: [],
+        lastUpdatedChapter: 3,
+      },
+      characterStates: { characters: [], lastUpdated: "" },
+      foreshadowing: { items: [], lastUpdated: "" },
+      previousSnapshot: null,
+      internalConflict: false,
+      rawLoadError: false,
+    };
+    const draft = '李雷说："我已经知道了暗杀计划，所以早有准备。"';
+    const deviations = identifyDeviations(draft, evidence);
+    expect(deviations).toHaveLength(1);
+    expect(deviations[0].type).toBe("cognition");
+    expect(deviations[0].severity).toBe("high");
+    expect(deviations[0].expected).toContain("李雷不知道暗杀计划");
+    expect(deviations[0].memoryEvidence).toContain("暗杀计划");
+  });
+
+  it("没有偏差时返回空数组", () => {
+    const evidence: ReviewEvidence = {
+      cognition: {
+        characters: [
+          { character: "李雷", knows: ["暗杀计划"], doesNotKnow: [] },
+        ],
+        readerKnows: [],
+        lastUpdatedChapter: 3,
+      },
+      characterStates: { characters: [], lastUpdated: "" },
+      foreshadowing: { items: [], lastUpdated: "" },
+      previousSnapshot: null,
+      internalConflict: false,
+      rawLoadError: false,
+    };
+    const draft = '李雷说："我已经知道了暗杀计划，所以早有准备。"';
+    const deviations = identifyDeviations(draft, evidence);
+    expect(deviations).toHaveLength(0);
+  });
+
+  it("记忆中心为空时不下偏差（新作品首章）", () => {
+    const evidence: ReviewEvidence = {
+      cognition: null,
+      characterStates: { characters: [], lastUpdated: "" },
+      foreshadowing: { items: [], lastUpdated: "" },
+      previousSnapshot: null,
+      internalConflict: false,
+      rawLoadError: false,
+    };
+    const deviations = identifyDeviations("任意草稿内容", evidence);
+    expect(deviations).toHaveLength(0);
   });
 });
