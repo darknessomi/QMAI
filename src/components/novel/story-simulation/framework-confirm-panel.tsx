@@ -1,6 +1,6 @@
-import { useState } from "react"
-import { useTranslation } from "react-i18next"
-import { Check, GripVertical, Pencil, X } from "lucide-react"
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Check, GripVertical, Pencil, X } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -9,28 +9,28 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-} from "@dnd-kit/core"
+} from "@dnd-kit/core";
 import {
   arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
   useSortable,
-} from "@dnd-kit/sortable"
-import { CSS } from "@dnd-kit/utilities"
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { useStorySimulationStore } from "@/stores/story-simulation-store"
-import type { StoryNode } from "@/lib/novel/story-simulation/types"
-import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { useStorySimulationStore } from "@/stores/story-simulation-store";
+import type { StoryNode } from "@/lib/novel/story-simulation/types";
+import { cn } from "@/lib/utils";
 
 interface FrameworkConfirmPanelProps {
-  onConfirm: () => void
-  onRegenerate: () => void
-  onSave?: () => void
-  onViewHistory?: () => void           // 新增：查看历史结果
+  onConfirm: () => void;
+  onRegenerate: () => void;
+  onSave?: () => void;
+  onViewHistory?: () => void; // 新增：查看历史结果
 }
 
 // 起/承/转/合 阶段对应的标签配色
@@ -39,7 +39,7 @@ const PHASE_STYLES: Record<StoryNode["phase"], string> = {
   承: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
   转: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
   合: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
-}
+};
 
 export function FrameworkConfirmPanel({
   onConfirm,
@@ -47,15 +47,17 @@ export function FrameworkConfirmPanel({
   onSave,
   onViewHistory,
 }: FrameworkConfirmPanelProps) {
-  const { t } = useTranslation()
-  const currentFramework = useStorySimulationStore((s) => s.currentFramework)
-  const setCurrentFramework = useStorySimulationStore((s) => s.setCurrentFramework)
-  const [savedTip, setSavedTip] = useState(false)
-  const [editingTitle, setEditingTitle] = useState(false)
-  const [editingPremise, setEditingPremise] = useState(false)
-  const [titleDraft, setTitleDraft] = useState("")
-  const [shortTitleDraft, setShortTitleDraft] = useState("")
-  const [premiseDraft, setPremiseDraft] = useState("")
+  const { t } = useTranslation();
+  const currentFramework = useStorySimulationStore((s) => s.currentFramework);
+  const setCurrentFramework = useStorySimulationStore(
+    (s) => s.setCurrentFramework,
+  );
+  const [savedTip, setSavedTip] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editingPremise, setEditingPremise] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [shortTitleDraft, setShortTitleDraft] = useState("");
+  const [premiseDraft, setPremiseDraft] = useState("");
 
   // 拖拽传感器（需在 early return 之前调用，避免违反 Rules of Hooks）
   const sensors = useSensors(
@@ -65,56 +67,58 @@ export function FrameworkConfirmPanel({
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     }),
-  )
+  );
 
-  if (!currentFramework) return null
+  if (!currentFramework) return null;
 
   // 节点按 index 排序后的引用，供渲染与拖拽复用
-  const sortedNodes = currentFramework.nodes.slice().sort((a, b) => a.index - b.index)
+  const sortedNodes = currentFramework.nodes
+    .slice()
+    .sort((a, b) => a.index - b.index);
 
   const handleSave = () => {
-    if (!onSave) return
-    onSave()
-    setSavedTip(true)
-    setTimeout(() => setSavedTip(false), 2000)
-  }
+    if (!onSave) return;
+    onSave();
+    setSavedTip(true);
+    setTimeout(() => setSavedTip(false), 2000);
+  };
 
   const startEditTitle = () => {
-    setTitleDraft(currentFramework.title)
-    setShortTitleDraft(currentFramework.shortTitle || "")
-    setEditingTitle(true)
-  }
+    setTitleDraft(currentFramework.title);
+    setShortTitleDraft(currentFramework.shortTitle || "");
+    setEditingTitle(true);
+  };
 
   const saveTitle = () => {
-    if (!titleDraft.trim()) return
+    if (!titleDraft.trim()) return;
     setCurrentFramework({
       ...currentFramework,
       title: titleDraft.trim(),
       shortTitle: shortTitleDraft.trim() || undefined,
-    })
-    setEditingTitle(false)
-  }
+    });
+    setEditingTitle(false);
+  };
 
   const cancelEditTitle = () => {
-    setEditingTitle(false)
-  }
+    setEditingTitle(false);
+  };
 
   const startEditPremise = () => {
-    setPremiseDraft(currentFramework.premise)
-    setEditingPremise(true)
-  }
+    setPremiseDraft(currentFramework.premise);
+    setEditingPremise(true);
+  };
 
   const savePremise = () => {
     setCurrentFramework({
       ...currentFramework,
       premise: premiseDraft,
-    })
-    setEditingPremise(false)
-  }
+    });
+    setEditingPremise(false);
+  };
 
   const cancelEditPremise = () => {
-    setEditingPremise(false)
-  }
+    setEditingPremise(false);
+  };
 
   const updateNode = (nodeIndex: number, updates: Partial<StoryNode>) => {
     setCurrentFramework({
@@ -122,25 +126,25 @@ export function FrameworkConfirmPanel({
       nodes: currentFramework.nodes.map((n) =>
         n.index === nodeIndex ? { ...n, ...updates } : n,
       ),
-    })
-  }
+    });
+  };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event
-    if (!over || active.id === over.id || !currentFramework) return
+    const { active, over } = event;
+    if (!over || active.id === over.id || !currentFramework) return;
 
-    const oldIndex = sortedNodes.findIndex((n) => n.index === active.id)
-    const newIndex = sortedNodes.findIndex((n) => n.index === over.id)
-    if (oldIndex === -1 || newIndex === -1) return
+    const oldIndex = sortedNodes.findIndex((n) => n.index === active.id);
+    const newIndex = sortedNodes.findIndex((n) => n.index === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
 
-    const reordered = arrayMove(sortedNodes, oldIndex, newIndex)
-    const updatedNodes = reordered.map((n, i) => ({ ...n, index: i }))
+    const reordered = arrayMove(sortedNodes, oldIndex, newIndex);
+    const updatedNodes = reordered.map((n, i) => ({ ...n, index: i }));
     setCurrentFramework({
       ...currentFramework,
       nodes: updatedNodes,
-    })
-    setSavedTip(false)
-  }
+    });
+    setSavedTip(false);
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -156,8 +160,8 @@ export function FrameworkConfirmPanel({
                 className="h-8 flex-1 min-w-[200px] text-base font-semibold"
                 autoFocus
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") saveTitle()
-                  if (e.key === "Escape") cancelEditTitle()
+                  if (e.key === "Enter") saveTitle();
+                  if (e.key === "Escape") cancelEditTitle();
                 }}
               />
               <Input
@@ -166,14 +170,24 @@ export function FrameworkConfirmPanel({
                 placeholder="短标题（可选）"
                 className="h-8 w-32 text-sm"
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") saveTitle()
-                  if (e.key === "Escape") cancelEditTitle()
+                  if (e.key === "Enter") saveTitle();
+                  if (e.key === "Escape") cancelEditTitle();
                 }}
               />
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={saveTitle}>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 w-8 p-0"
+                onClick={saveTitle}
+              >
                 <Check className="h-4 w-4 text-emerald-500" />
               </Button>
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={cancelEditTitle}>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 w-8 p-0"
+                onClick={cancelEditTitle}
+              >
                 <X className="h-4 w-4 text-muted-foreground" />
               </Button>
             </div>
@@ -271,7 +285,10 @@ export function FrameworkConfirmPanel({
       </div>
 
       {/* 节点列表 */}
-      <div className="flex flex-col gap-3">
+      <div
+        className="flex min-h-0 flex-col gap-3 overflow-y-auto"
+        style={{ maxHeight: "calc(100vh - 320px)" }}
+      >
         <div className="text-sm font-medium text-muted-foreground">
           {t("storySimulation.frameworkNodes")}
           <span className="ml-2 text-xs font-normal text-muted-foreground/70">
@@ -298,15 +315,15 @@ export function FrameworkConfirmPanel({
         </DndContext>
       </div>
     </div>
-  )
+  );
 }
 
 function SortableNodeCard({
   node,
   onUpdate,
 }: {
-  node: StoryNode
-  onUpdate: (updates: Partial<StoryNode>) => void
+  node: StoryNode;
+  onUpdate: (updates: Partial<StoryNode>) => void;
 }) {
   const {
     attributes,
@@ -315,13 +332,13 @@ function SortableNodeCard({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: node.index })
+  } = useSortable({ id: node.index });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-  }
+  };
 
   return (
     <div ref={setNodeRef} style={style} className="relative">
@@ -338,30 +355,32 @@ function SortableNodeCard({
         <FrameworkNodeCard node={node} onUpdate={onUpdate} />
       </div>
     </div>
-  )
+  );
 }
 
 function FrameworkNodeCard({
   node,
   onUpdate,
 }: {
-  node: StoryNode
-  onUpdate: (updates: Partial<StoryNode>) => void
+  node: StoryNode;
+  onUpdate: (updates: Partial<StoryNode>) => void;
 }) {
-  const { t } = useTranslation()
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState<Omit<StoryNode, "involvedCharacters"> & { involvedCharacters: string }>({
+  const { t } = useTranslation();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<
+    Omit<StoryNode, "involvedCharacters"> & { involvedCharacters: string }
+  >({
     ...node,
     involvedCharacters: node.involvedCharacters.join("、"),
-  })
+  });
 
   const startEdit = () => {
     setDraft({
       ...node,
       involvedCharacters: node.involvedCharacters.join("、"),
-    })
-    setEditing(true)
-  }
+    });
+    setEditing(true);
+  };
 
   const save = () => {
     onUpdate({
@@ -374,15 +393,15 @@ function FrameworkNodeCard({
       goal: draft.goal,
       causeFromPrev: draft.causeFromPrev,
       expectedOutcome: draft.expectedOutcome,
-    })
-    setEditing(false)
-  }
+    });
+    setEditing(false);
+  };
 
   const cancel = () => {
-    setEditing(false)
-  }
+    setEditing(false);
+  };
 
-  const involvedCharsStr = String(draft.involvedCharacters)
+  const involvedCharsStr = String(draft.involvedCharacters);
 
   return (
     <div className="rounded-lg border p-4">
@@ -392,7 +411,7 @@ function FrameworkNodeCard({
           <span
             className={cn(
               "shrink-0 rounded px-1.5 py-0.5 text-xs font-medium",
-              PHASE_STYLES[node.phase]
+              PHASE_STYLES[node.phase],
             )}
           >
             {node.phase}
@@ -404,8 +423,8 @@ function FrameworkNodeCard({
               className="h-7 flex-1 text-sm font-medium"
               autoFocus
               onKeyDown={(e) => {
-                if (e.key === "Enter") save()
-                if (e.key === "Escape") cancel()
+                if (e.key === "Enter") save();
+                if (e.key === "Escape") cancel();
               }}
             />
           ) : (
@@ -424,10 +443,20 @@ function FrameworkNodeCard({
           </Button>
         ) : (
           <div className="flex shrink-0 items-center gap-1">
-            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={save}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={save}
+            >
               <Check className="h-4 w-4 text-emerald-500" />
             </Button>
-            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={cancel}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={cancel}
+            >
               <X className="h-4 w-4 text-muted-foreground" />
             </Button>
           </div>
@@ -440,7 +469,9 @@ function FrameworkNodeCard({
           <FieldEdit label={t("storySimulation.coreConflict")}>
             <Textarea
               value={draft.coreConflict}
-              onChange={(e) => setDraft({ ...draft, coreConflict: e.target.value })}
+              onChange={(e) =>
+                setDraft({ ...draft, coreConflict: e.target.value })
+              }
               rows={2}
               className="text-sm"
             />
@@ -469,7 +500,9 @@ function FrameworkNodeCard({
           <FieldEdit label={t("storySimulation.cause")}>
             <Textarea
               value={draft.causeFromPrev}
-              onChange={(e) => setDraft({ ...draft, causeFromPrev: e.target.value })}
+              onChange={(e) =>
+                setDraft({ ...draft, causeFromPrev: e.target.value })
+              }
               rows={2}
               className="text-sm"
             />
@@ -477,7 +510,9 @@ function FrameworkNodeCard({
           <FieldEdit label={t("storySimulation.expectedOutcome")}>
             <Textarea
               value={draft.expectedOutcome}
-              onChange={(e) => setDraft({ ...draft, expectedOutcome: e.target.value })}
+              onChange={(e) =>
+                setDraft({ ...draft, expectedOutcome: e.target.value })
+              }
               rows={2}
               className="text-sm"
             />
@@ -488,12 +523,12 @@ function FrameworkNodeCard({
           <dt className="whitespace-nowrap text-muted-foreground">
             {t("storySimulation.coreConflict")}
           </dt>
-          <dd className="leading-relaxed">{node.coreConflict}</dd>
+          <dd className="break-words leading-relaxed">{node.coreConflict}</dd>
 
           <dt className="whitespace-nowrap text-muted-foreground">
             {t("storySimulation.involvedCharacters")}
           </dt>
-          <dd className="leading-relaxed">
+          <dd className="break-words leading-relaxed">
             {Array.isArray(node.involvedCharacters)
               ? node.involvedCharacters.join("、")
               : node.involvedCharacters}
@@ -502,34 +537,36 @@ function FrameworkNodeCard({
           <dt className="whitespace-nowrap text-muted-foreground">
             {t("storySimulation.goal")}
           </dt>
-          <dd className="leading-relaxed">{node.goal}</dd>
+          <dd className="break-words leading-relaxed">{node.goal}</dd>
 
           <dt className="whitespace-nowrap text-muted-foreground">
             {t("storySimulation.cause")}
           </dt>
-          <dd className="leading-relaxed">{node.causeFromPrev}</dd>
+          <dd className="break-words leading-relaxed">{node.causeFromPrev}</dd>
 
           <dt className="whitespace-nowrap text-muted-foreground">
             {t("storySimulation.expectedOutcome")}
           </dt>
-          <dd className="leading-relaxed">{node.expectedOutcome}</dd>
+          <dd className="break-words leading-relaxed">
+            {node.expectedOutcome}
+          </dd>
         </dl>
       )}
     </div>
-  )
+  );
 }
 
 function FieldEdit({
   label,
   children,
 }: {
-  label: string
-  children: React.ReactNode
+  label: string;
+  children: React.ReactNode;
 }) {
   return (
     <div>
       <div className="mb-1 text-xs text-muted-foreground">{label}</div>
       {children}
     </div>
-  )
+  );
 }
