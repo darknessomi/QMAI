@@ -1352,6 +1352,8 @@
       "error": "Generation failed",
       "ingest": "Extract Initial Memory",
       "ingesting": "Extracting initial memory...",
+      "reingestButton": "Re-extract Memory",
+      "reingestTitle": "Re-extract initial memory (overwrites the previous extraction)",
       "bulkIngest": "Extract All",
       "bulkIngesting": "Extracting all...",
       "bulkIngestEmpty": "There are no outline documents to extract in the current outline library.",

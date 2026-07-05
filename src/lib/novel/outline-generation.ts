@@ -701,9 +701,7 @@ export interface RunOutlineIngestTaskOptions {
   manageProgress?: boolean
 }
 
-function getOutlineFileName(outlinePath: string): string {
-  return outlinePath.split("/").pop()?.replace(".md", "") || "大纲"
-}
+import { getOutlineFileName } from "./outline-ingest-utils"
 
 function buildOutlineIngestFailureReason(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -722,6 +720,25 @@ function finalizeOutstandingIngestTasks(taskIds: string[], cancelled: boolean): 
     const task = useOutlineGenerationStore.getState().tasks.find((item) => item.id === taskId)
     if (task?.status !== "ingesting") continue
     useOutlineGenerationStore.getState().updateTask(taskId, {
+      status: "error",
+      message,
+      error: message,
+    })
+  }
+}
+
+/** Clear orphaned ingest tasks when no outline import progress is running. */
+export function reconcileStaleOutlineIngestTasks(projectPath: string): void {
+  const pp = normalizePath(projectPath)
+  const hasRunningOutlineImport = useImportProgressStore.getState().tasks.some(
+    (task) => task.projectPath === pp && task.kind === "outline" && task.status === "running",
+  )
+  if (hasRunningOutlineImport) return
+
+  const message = getOutlineIngestCancelledMessage()
+  for (const task of useOutlineGenerationStore.getState().tasks) {
+    if (task.projectPath !== pp || task.kind !== "ingest" || task.status !== "ingesting") continue
+    useOutlineGenerationStore.getState().updateTask(task.id, {
       status: "error",
       message,
       error: message,
@@ -1015,6 +1032,13 @@ export async function runOutlineIngestPaths(
   finalizeOutstandingIngestTasks(taskIds, cancelled)
 
   return result
+}
+
+export async function runSingleOutlineIngest(
+  projectPath: string,
+  outlinePath: string,
+): Promise<BulkOutlineIngestResult> {
+  return runOutlineIngestPaths(projectPath, [normalizePath(outlinePath)])
 }
 
 export function startOutlineIngestTask(projectPath: string, outlinePath: string): string {

@@ -1294,6 +1294,8 @@
       "error": "生成失败",
       "ingest": "提取初始记忆",
       "ingesting": "正在提取初始记忆...",
+      "reingestButton": "重新提取记忆",
+      "reingestTitle": "重新提取初始记忆（将覆盖上次提取的内容）",
       "bulkIngest": "一键提取",
       "bulkIngesting": "一键提取中...",
       "bulkIngestEmpty": "当前大纲库里没有可提取的大纲文档。",

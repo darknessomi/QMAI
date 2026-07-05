@@ -88,7 +88,13 @@ export const useImportProgressStore = create<ImportProgressState>((set, get) => 
     }))
   },
   finishTask: (taskId, status, patch = {}) => {
+    const task = get().tasks.find((item) => item.id === taskId)
     get().updateTask(taskId, { ...patch, status, cancelling: false })
+    if (task?.kind === "outline" && status !== "running") {
+      void import("@/lib/novel/outline-generation").then(({ reconcileStaleOutlineIngestTasks }) => {
+        reconcileStaleOutlineIngestTasks(task.projectPath)
+      })
+    }
   },
   markCancelling: (taskId) => {
     get().updateTask(taskId, { cancelling: true })
@@ -97,7 +103,12 @@ export const useImportProgressStore = create<ImportProgressState>((set, get) => 
     const task = get().tasks.find((t) => t.id === taskId)
     if (!task) return
     task.abortController?.abort()
-    get().updateTask(taskId, { status: "cancelled", cancelling: false })
+    get().updateTask(taskId, { status: "cancelled", cancelling: false, activeTitles: [] })
+    if (task.kind === "outline") {
+      void import("@/lib/novel/outline-generation").then(({ reconcileStaleOutlineIngestTasks }) => {
+        reconcileStaleOutlineIngestTasks(task.projectPath)
+      })
+    }
     setTimeout(() => {
       get().clearTask(taskId)
     }, 3000)

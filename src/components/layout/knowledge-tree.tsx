@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, FolderInput, FolderOpen, Globe, Loader2, Pencil, Plus, Trash2, Check, X } from "lucide-react"
+import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, FolderInput, FolderOpen, Globe, Loader2, Pencil, Plus, Sparkles, Trash2, Check, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,9 @@ import { normalizeChapterStatus, type ChapterStatus } from "@/lib/novel/chapter-
 import { moveFileToTrash } from "@/lib/trash"
 import { makeChapterFileName, makeDefaultChapterTitle, makeSafeFileSlug } from "@/lib/wiki-filename"
 import { useImportProgressStore, type ImportProgressTask } from "@/stores/import-progress-store"
+import { useOutlineGenerationStore } from "@/stores/outline-generation-store"
+import { startOutlineIngestTask } from "@/lib/novel/outline-generation"
+import { getOutlineFileName, outlineSnapshotExists } from "@/lib/novel/outline-ingest-utils"
 import { saveLastReadChapter } from "@/lib/project-store"
 
 function formatImportProgressRunningLabel(task: ImportProgressTask, kindLabel: string): string {
@@ -287,13 +290,17 @@ export function KnowledgeTree({
 }: KnowledgeTreeProps) {
   const { t } = useTranslation()
   const project = useWikiStore((s) => s.project)
+  const novelMode = useWikiStore((s) => s.novelMode)
   const selectedFile = useWikiStore((s) => s.selectedFile)
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
   const fileTree = useWikiStore((s) => s.fileTree)
   const setFileTree = useWikiStore((s) => s.setFileTree)
   const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
   const dataVersion = useWikiStore((s) => s.dataVersion)
+  const outlineTasks = useOutlineGenerationStore((s) => s.tasks)
+  const outlineImportTasks = useImportProgressStore((s) => s.tasks)
   const [pages, setPages] = useState<WikiPageInfo[]>([])
+  const [extractedOutlinePaths, setExtractedOutlinePaths] = useState<Set<string>>(() => new Set())
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({})
   const [armedPath, setArmedPath] = useState<string | null>(null)
   const [deletingPath, setDeletingPath] = useState<string | null>(null)
@@ -394,6 +401,59 @@ export function KnowledgeTree({
   }, [filterType, pages, pendingPages])
 
   const effectivePages = useMemo(() => [...pageInfoByPath.values()], [pageInfoByPath])
+
+  const outlinePages = useMemo(
+    () => effectivePages.filter((page): page is WikiPageInfo & { type: "outline" } => page.type === "outline"),
+    [effectivePages],
+  )
+
+  useEffect(() => {
+    if (!project || filterType !== "outline" || !novelMode) {
+      setExtractedOutlinePaths(new Set())
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const extracted = new Set<string>()
+      await Promise.all(outlinePages.map(async (page) => {
+        if (await outlineSnapshotExists(project.path, page.path)) {
+          extracted.add(normalizePath(page.path))
+        }
+      }))
+      if (!cancelled) setExtractedOutlinePaths(extracted)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [filterType, novelMode, outlinePages, project, dataVersion, outlineTasks, outlineImportTasks])
+
+  const isOutlinePathIngesting = useCallback((outlinePath: string) => {
+    if (!project) return false
+    const normalizedPath = normalizePath(outlinePath)
+    const fileName = getOutlineFileName(normalizedPath)
+    const pp = normalizePath(project.path)
+    const importRunning = outlineImportTasks.find((task) => (
+      task.projectPath === pp &&
+      task.kind === "outline" &&
+      task.status === "running"
+    ))
+    if (importRunning) {
+      if (importRunning.total === 1 && importRunning.currentTitle === fileName) return true
+      if (importRunning.activeTitles?.includes(fileName)) return true
+    }
+    return outlineTasks.some((task) => (
+      task.projectPath === pp &&
+      task.kind === "ingest" &&
+      task.outlinePath != null &&
+      normalizePath(task.outlinePath) === normalizedPath &&
+      task.status === "ingesting"
+    ))
+  }, [outlineImportTasks, outlineTasks, project])
+
+  const handleOutlineIngest = useCallback((outlinePath: string) => {
+    if (!project || !novelMode || isOutlinePathIngesting(outlinePath)) return
+    startOutlineIngestTask(project.path, outlinePath)
+  }, [isOutlinePathIngesting, novelMode, project])
 
   const sortedChapterPages = useMemo(() => {
     return effectivePages
@@ -1066,6 +1126,8 @@ export function KnowledgeTree({
       const isDragSource = dragSource === normalizedPath
       const chapterIndex = chapterIndexMap.get(normalizedPath)
       const isInsertTarget = isDragging && dragInsertIndex !== null && chapterIndex !== undefined && chapterIndex === dragInsertIndex && !isDragSource
+      const isOutlineExtracted = filterType === "outline" && extractedOutlinePaths.has(normalizedPath)
+      const isOutlineIngesting = filterType === "outline" && isOutlinePathIngesting(normalizedPath)
       return [
         <div
           key={normalizedPath}
@@ -1139,6 +1201,27 @@ export function KnowledgeTree({
               </>
             )}
           </button>
+          {filterType === "outline" && novelMode ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`mr-0 h-7 w-7 shrink-0 ${isOutlineExtracted ? "text-emerald-600 hover:text-emerald-700" : ""}`}
+              title={isOutlineExtracted ? t("novel.outlineGenerator.reingestTitle") : t("novel.outlineGenerator.ingest")}
+              disabled={isOutlineIngesting}
+              onClick={(event) => {
+                event.stopPropagation()
+                handleOutlineIngest(normalizedPath)
+              }}
+            >
+              {isOutlineIngesting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : isOutlineExtracted ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+            </Button>
+          ) : null}
           <DeleteButton
             armed={isArmed}
             deleting={isDeleting}
@@ -1174,6 +1257,10 @@ export function KnowledgeTree({
     dragInsertIndex,
     isDragging,
     sortedChapterPages,
+    novelMode,
+    extractedOutlinePaths,
+    isOutlinePathIngesting,
+    handleOutlineIngest,
     t,
   ])
 
