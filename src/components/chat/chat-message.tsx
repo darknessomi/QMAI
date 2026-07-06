@@ -191,8 +191,7 @@ export function ChatMessage({
           <div className="flex items-center gap-1 flex-wrap">
             {canResumeUnfinished && (
               <div className="basis-full rounded-md border border-amber-500/30 bg-amber-50/60 px-2 py-1.5 text-[11px] leading-5 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
-                这次深度生成已经完成了部分思考过程。点击“继续未完成”会基于上方已有阶段继续往后生成，通常比“重新生成”更节省
-                token；如果前面的思考方向本身不对，再使用“重新生成”。
+                这次深度生成已经完成了部分思考过程。点击“继续未完成”会基于上方已有阶段继续往后生成，通常比“重新生成”更节省 token；如果前面的思考方向本身不对，再使用“重新生成”。
               </div>
             )}
             {novelMode && isLastAssistant && onSaveAsChapter && (
@@ -704,7 +703,7 @@ export function StreamingMessage({ content }: StreamingMessageProps) {
       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
         <Bot className="h-4 w-4" />
       </div>
-      <div className="max-w-[80%] rounded-lg border bg-background px-3 py-2 text-sm text-foreground">
+      <div className="w-fit max-w-full lg:max-w-[50vw] rounded-lg border bg-background px-3 py-2 text-sm text-foreground">
         {isThinking ? (
           <StreamingWorkflowBlock content={thinking} />
         ) : (

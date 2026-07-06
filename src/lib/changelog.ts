@@ -78,6 +78,25 @@ const TWO_POINT_TWO_ELEVEN_CHANGELOG: ChangelogEntry = {
   },
 };
 
+const TWO_POINT_TWO_THIRTY_THREE_CHANGELOG: ChangelogEntry = {
+  version: "2.2.33",
+  date: "2026-07-06",
+  highlights: {
+    en: [
+      "Optimized AI chapter plan execution with a user-facing chapter plan, hidden execution contract, and visible execution report.",
+      "Added execution recheck and targeted repair so generated chapters are validated against the plan before returning results.",
+      "Improved chapter plan confirmation and activity output so planning, execution, and verification are easier to trace.",
+      "Stabilized AI chat and related mock coverage after the plan execution workflow changes.",
+    ],
+    zh: [
+      "优化 AI 会话章节计划执行：新增面向用户的本章策划案、隐藏执行契约和可查看的执行报告。",
+      "新增执行复核与定向修复，生成章节会按计划契约检查后再返回结果。",
+      "优化章节计划确认弹窗和执行动态展示，让计划、执行、复核过程更容易追踪。",
+      "修复计划执行优化后的 AI 会话相关 mock 测试回归，提升当前版本稳定性。",
+    ],
+  },
+};
+
 const TWO_POINT_TWO_THIRTY_TWO_CHANGELOG: ChangelogEntry = {
   version: "2.2.32",
   date: "2026-07-04",
@@ -766,6 +785,8 @@ export const CHANGELOG: ChangelogEntry[] = [
 ];
 
 export function currentVersionChangelog(version: string): ChangelogEntry[] {
+  if (version === TWO_POINT_TWO_THIRTY_THREE_CHANGELOG.version)
+    return [TWO_POINT_TWO_THIRTY_THREE_CHANGELOG];
   if (version === TWO_POINT_TWO_THIRTY_TWO_CHANGELOG.version)
     return [TWO_POINT_TWO_THIRTY_TWO_CHANGELOG];
   if (version === TWO_POINT_TWO_THIRTY_ONE_CHANGELOG.version)
@@ -829,6 +850,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    TWO_POINT_TWO_THIRTY_THREE_CHANGELOG,
     TWO_POINT_TWO_THIRTY_TWO_CHANGELOG,
     TWO_POINT_TWO_THIRTY_ONE_CHANGELOG,
     TWO_POINT_TWO_THIRTY_CHANGELOG,
