@@ -8,7 +8,7 @@
  * 任一阶段失败 → 硬失败，显示原因，不回退、不留空、不降级。
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react"
 import { Loader2, AlertCircle, Plus, X } from "lucide-react";
 import {
   Dialog,
@@ -83,17 +83,28 @@ async function collectStageOutput(
   prompt: string,
   cachePrefix: string,
   llmConfig: Parameters<typeof streamChat>[0],
+  signal?: AbortSignal,
 ): Promise<string> {
   const messages = buildCachedMessages(prompt, cachePrefix);
   let output = "";
   await new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
     void streamChat(llmConfig, messages, {
       onToken: (token) => {
+        if (signal?.aborted) return;
         output += token;
       },
       onDone: resolve,
       onError: reject,
     });
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      }, { once: true });
+    }
   });
   return output;
 }
@@ -128,6 +139,8 @@ export function PlotFrameworkExtractDialog({
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
   const startedRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // 预览态表单字段
   const [title, setTitle] = useState("");
@@ -164,6 +177,10 @@ export function PlotFrameworkExtractDialog({
 
   async function runExtraction() {
     try {
+      cancelledRef.current = false;
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
+
       // ── 前置校验 ──
       if (!project) {
         throw new Error("未打开项目，无法提取框架");
@@ -189,6 +206,7 @@ export function PlotFrameworkExtractDialog({
           "阶段0 失败：拆文结果中四段框架不完整（钩子/铺垫/爽点/结尾钩子缺一不可）",
         );
       }
+      if (cancelledRef.current) throw new DOMException("Aborted", "AbortError");
       const lineage = extractPlotFrameworkLineageFromAnalysis(analysisMarkdown);
 
       // ── 阶段1-4：并行拆解 ──
@@ -199,24 +217,29 @@ export function PlotFrameworkExtractDialog({
           buildDismantlingCharacterPrompt({ projectTitle, chapters }),
           cachePrefix,
           modelConfig,
+          signal,
         ),
         collectStageOutput(
           buildDismantlingDirectionPrompt({ projectTitle, chapters }),
           cachePrefix,
           modelConfig,
+          signal,
         ),
         collectStageOutput(
           buildDismantlingHandcraftPrompt({ projectTitle, chapters }),
           cachePrefix,
           modelConfig,
+          signal,
         ),
         collectStageOutput(
           buildDismantlingForeshadowingPrompt({ projectTitle, chapters }),
           cachePrefix,
           modelConfig,
+          signal,
         ),
       ]);
 
+      if (cancelledRef.current) throw new DOMException("Aborted", "AbortError");
       const stageCharacters = extractCharactersFromStage(charRaw);
       const stageDirection = extractDirectionHintsFromStage(dirRaw);
       const stageHandcraft = extractHandcraftHintsFromStage(craftRaw);
@@ -240,7 +263,9 @@ export function PlotFrameworkExtractDialog({
         mergePrompt,
         cachePrefix,
         modelConfig,
+        signal,
       );
+      if (cancelledRef.current) throw new DOMException("Aborted", "AbortError");
       const merged = parseFrameworkMergeOutput(mergeRaw);
 
       // ── 预览态：预填表单 ──
@@ -259,9 +284,18 @@ export function PlotFrameworkExtractDialog({
         stageForeshadowing,
       );
     } catch (err) {
+      if ((err as DOMException)?.name === "AbortError") {
+        setPhase("idle");
+        setError("");
+        setProgress("");
+        onOpenChange(false);
+        return;
+      }
       setPhase("error");
       setError(err instanceof Error ? err.message : String(err));
       setProgress("✋ 失败");
+    } finally {
+      abortControllerRef.current = null;
     }
   }
 
@@ -296,6 +330,23 @@ export function PlotFrameworkExtractDialog({
     setHandcraftHints(merged.handcraftHints || stageHandcraft);
     setPrevConnector(merged.prevConnector || lineage?.prevConnector || "");
     setNextConnector(merged.nextConnector || lineage?.nextConnector || "");
+  }
+
+  function handleRetry() {
+    setPhase("idle");
+    setError("");
+    setProgress("");
+    startedRef.current = false;
+    void runExtraction();
+  }
+
+  function handleCancel() {
+    if (!executing) {
+      onOpenChange(false);
+      return;
+    }
+    cancelledRef.current = true;
+    abortControllerRef.current?.abort();
   }
 
   async function handleSave() {
@@ -369,7 +420,13 @@ export function PlotFrameworkExtractDialog({
   const inPreview = phase === "preview";
 
   return (
-    <Dialog open={open} onOpenChange={executing ? undefined : onOpenChange}>
+    <Dialog open={open} onOpenChange={(open) => {
+      if (!open && executing) {
+        handleCancel();
+      } else if (!executing) {
+        onOpenChange(open);
+      }
+    }}>
       <DialogContent className="sm:max-w-[700px]">
         <DialogHeader>
           <DialogTitle>提取剧情框架</DialogTitle>
@@ -578,9 +635,14 @@ export function PlotFrameworkExtractDialog({
 
         <DialogFooter>
           {inError && (
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              关闭
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                关闭
+              </Button>
+              <Button onClick={handleRetry}>
+                重试
+              </Button>
+            </>
           )}
           {inPreview && (
             <>
@@ -603,8 +665,8 @@ export function PlotFrameworkExtractDialog({
             </>
           )}
           {executing && (
-            <Button variant="outline" disabled>
-              执行中...
+            <Button variant="outline" onClick={handleCancel}>
+              取消
             </Button>
           )}
         </DialogFooter>

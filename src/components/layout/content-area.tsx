@@ -54,6 +54,11 @@ const DismantlingView = lazy(async () => {
   return { default: mod.DismantlingView }
 })
 
+const PlotFrameworkLibraryView = lazy(async () => {
+  const mod = await import("@/components/novel/plot-framework-library-view")
+  return { default: mod.PlotFrameworkLibraryView }
+})
+
 const StorySimulationView = lazy(async () => {
   const mod = await import("@/components/novel/story-simulation/story-simulation-view")
   return { default: mod.StorySimulationView }
@@ -141,6 +146,13 @@ export function ContentArea() {
         content = (
           <Suspense fallback={<LoadingView />}>
             <DismantlingView />
+          </Suspense>
+        )
+        break
+      case "plotFrameworkLibrary":
+        content = (
+          <Suspense fallback={<LoadingView />}>
+            <PlotFrameworkLibraryView />
           </Suspense>
         )
         break

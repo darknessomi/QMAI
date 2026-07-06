@@ -74,8 +74,28 @@ export interface PlotFramework {
   pacing?: "tight" | "standard" | "loose"
   /** AI 是否已自动初判（true=AI 给的初判，false=用户已手动校正） */
   autoPacing?: boolean
+  /** 用户自定义标签（用于分类筛选，如"爽文"、"复仇"、"转职"） */
+  tags?: string[]
+  /** 版本历史（每次编辑保存前将上一版本快照存入此数组） */
+  history?: PlotFrameworkSnapshot[]
   createdAt: number
   updatedAt: number
+}
+
+/** 框架版本快照（用于版本历史回滚） */
+export interface PlotFrameworkSnapshot {
+  /** 快照时间戳 */
+  savedAt: number
+  /** 快照时的标题 */
+  title: string
+  /** 快照时的四段正文 */
+  beats: PlotFrameworkBeats
+  /** 快照时的方向提示 */
+  directionHints: string
+  /** 快照时的手工提示 */
+  handcraftHints: string
+  /** 快照时的可复用模板 */
+  reusableTemplate: string
 }
 
 /** 跨作品框架库（顶层共享实体） */
@@ -142,9 +162,26 @@ export function normalizePlotFramework(
     nextConnector: typeof input.nextConnector === "string" && input.nextConnector.trim() ? input.nextConnector.trim() : undefined,
     pacing: normalizePacing(input.pacing),
     autoPacing: typeof input.autoPacing === "boolean" ? input.autoPacing : true,
+    tags: normalizeTags(input.tags),
+    history: Array.isArray(input.history) ? input.history.slice(-20) : [],
     createdAt: Number(input.createdAt) || now,
     updatedAt: Number(input.updatedAt) || now,
   }
+}
+
+/** 规范化标签数组：去空、去重、trim */
+function normalizeTags(input: unknown): string[] {
+  if (!Array.isArray(input)) return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of input) {
+    if (typeof item !== "string") continue
+    const tag = item.trim()
+    if (!tag || seen.has(tag)) continue
+    seen.add(tag)
+    result.push(tag)
+  }
+  return result
 }
 
 function normalizeCharacters(input: unknown): PlotFrameworkCharacter[] {
