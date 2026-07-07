@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
-import { open, save } from "@tauri-apps/plugin-dialog"
-import { readFile, writeFile } from "@/commands/fs"
+import { open } from "@tauri-apps/plugin-dialog"
+import { readFile } from "@/commands/fs"
 import { useWikiStore } from "@/stores/wiki-store"
 import {
   createBlankProjectDeAiSkill,
@@ -12,8 +12,6 @@ import {
 } from "@/lib/novel/de-ai-skill-library"
 import {
   createBlankWritingSkill,
-  exportSkillToJson,
-  importLinkedSkill,
   importSkillFromJson,
   importWritingSkill,
   loadUserSkillConfig,
@@ -168,7 +166,6 @@ function SkillLibraryHeaderActions({ activeTab }: { activeTab: "skillLibrary" | 
   const project = useWikiStore((s) => s.project)
   const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
   const setActiveView = useWikiStore((s) => s.setActiveView)
-  const selectedWritingSkillId = useWikiStore((s) => s.selectedWritingSkillLibrarySkillId)
   const setSelectedSkillId = useWikiStore((s) => s.setSelectedSkillLibrarySkillId)
   const setSelectedWritingSkillId = useWikiStore((s) => s.setSelectedWritingSkillLibrarySkillId)
   const [message, setMessage] = useState("")
@@ -240,30 +237,6 @@ function SkillLibraryHeaderActions({ activeTab }: { activeTab: "skillLibrary" | 
     }
   }
 
-  async function handleImportDeAiSkillFolder() {
-    if (!project || saving) return
-    try {
-      const selected = await open({ multiple: false, directory: true })
-      if (!selected || typeof selected !== "string") return
-      const skillPath = `${selected.replace(/[\\/]+$/, "")}/SKILL.md`
-      const content = await readFile(skillPath)
-      const imported = importedDeAiSkillFromContent(skillPath, content)
-      if (!imported) {
-        setMessage("导入失败：文件夹中未找到有效的 SKILL.md")
-        return
-      }
-      const config = await loadDeAiSkillConfig(project.path)
-      const next = normalizeDeAiSkillConfig({
-        ...config,
-        defaultSkillId: imported.id,
-        projectSkills: [imported, ...config.projectSkills],
-      })
-      await persistDeAiConfig(next, imported.id)
-    } catch {
-      setMessage("导入失败：文件夹中未找到有效的 SKILL.md")
-    }
-  }
-
   async function handleCreateWritingSkill() {
     if (!project || saving) return
     const config = await loadUserSkillConfig(project.path)
@@ -303,47 +276,7 @@ function SkillLibraryHeaderActions({ activeTab }: { activeTab: "skillLibrary" | 
       }
       await persistWritingConfig(next, next.selectedSkillId)
     } catch {
-      setMessage("导入 Skill 失败")
-    }
-  }
-
-  async function handleImportWritingSkillFolder() {
-    if (!project || saving) return
-    try {
-      const selected = await open({ multiple: false, directory: true })
-      if (!selected || typeof selected !== "string") return
-      const config = await loadUserSkillConfig(project.path)
-      const next = await importLinkedSkill(config, selected)
-      if (!next.selectedSkillId) {
-        setMessage("导入失败：文件夹中未找到有效的 Skill 文件")
-        return
-      }
-      await persistWritingConfig(next, next.selectedSkillId)
-    } catch {
-      setMessage("导入失败：文件夹中未找到有效的 Skill 文件")
-    }
-  }
-
-  async function handleExportCurrentWritingSkill() {
-    if (!project || saving) return
-    try {
-      const config = await loadUserSkillConfig(project.path)
-      const selected = selectedWritingSkillId
-        ? config.skills.find((skill) => skill.id === selectedWritingSkillId)
-        : config.skills[0]
-      if (!selected) {
-        setMessage("请先选择写作 Skill")
-        return
-      }
-      const filePath = await save({
-        defaultPath: `${selected.name}.json`,
-        filters: [{ name: "JSON 文件", extensions: ["json"] }],
-      })
-      if (!filePath) return
-      await writeFile(filePath, exportSkillToJson(selected))
-      setMessage("导出成功")
-    } catch {
-      setMessage("导出 Skill 失败")
+      setMessage("导入失败")
     }
   }
 
@@ -357,12 +290,8 @@ function SkillLibraryHeaderActions({ activeTab }: { activeTab: "skillLibrary" | 
           <button type="button" onClick={() => void handleCreateDeAiSkill()} disabled={disabled} className={buttonClass}>
             新建技能
           </button>
-          <span className="text-xs text-muted-foreground">导入技能</span>
           <button type="button" onClick={() => void handleImportDeAiSkillFile()} disabled={disabled} className={buttonClass}>
-            导入文件
-          </button>
-          <button type="button" onClick={() => void handleImportDeAiSkillFolder()} disabled={disabled} className={buttonClass}>
-            导入文件夹
+            导入
           </button>
         </>
       ) : (
@@ -370,15 +299,8 @@ function SkillLibraryHeaderActions({ activeTab }: { activeTab: "skillLibrary" | 
           <button type="button" onClick={() => void handleCreateWritingSkill()} disabled={disabled} className={buttonClass}>
             新建 Skill
           </button>
-          <span className="text-xs text-muted-foreground">导入 Skill</span>
           <button type="button" onClick={() => void handleImportWritingSkill()} disabled={disabled} className={buttonClass}>
-            导入文件
-          </button>
-          <button type="button" onClick={() => void handleImportWritingSkillFolder()} disabled={disabled} className={buttonClass}>
-            导入文件夹
-          </button>
-          <button type="button" onClick={() => void handleExportCurrentWritingSkill()} disabled={disabled} className={buttonClass}>
-            导出当前
+            导入
           </button>
         </>
       )}
@@ -466,10 +388,12 @@ export function UnifiedSkillLibrarySidebarPanel() {
   function handleSelectEntry(entry: UnifiedSkillEntry) {
     if (entry.type === "writing") {
       setSelectedWritingSkillId(entry.sourceId)
+      setSelectedSkillId(null)
       setActiveView("writingSkillLibrary")
       return
     }
     setSelectedSkillId(entry.sourceId)
+    setSelectedWritingSkillId(null)
     setActiveView("skillLibrary")
   }
 
@@ -521,6 +445,7 @@ export function UnifiedSkillLibrarySidebarPanel() {
               key={entry.id}
               data-testid={`unified-skill-entry-${entry.id}`}
               role="button"
+              aria-current={active ? "true" : undefined}
               tabIndex={0}
               onClick={() => handleSelectEntry(entry)}
               onKeyDown={(event) => {

@@ -159,11 +159,13 @@ describe("UnifiedSkillLibraryView", () => {
   it("shows de-AI actions in the right header when de-AI skill tab is active", async () => {
     const { container, root } = await renderLibrary()
     const actions = container.querySelector<HTMLElement>('[data-testid="skill-library-header-actions"]')
+    const actionLabels = Array.from(actions?.querySelectorAll("button") ?? [])
+      .map((button) => button.textContent?.trim())
 
-    expect(actions?.textContent).toContain("新建技能")
-    expect(actions?.textContent).toContain("导入技能")
-    expect(actions?.textContent).toContain("导入文件")
-    expect(actions?.textContent).toContain("导入文件夹")
+    expect(actionLabels).toEqual(["新建技能", "导入"])
+    expect(actions?.textContent).not.toContain("导入技能")
+    expect(actions?.textContent).not.toContain("导入文件")
+    expect(actions?.textContent).not.toContain("导入文件夹")
     expect(actions?.textContent).not.toContain("新建 Skill")
     expect(actions?.textContent).not.toContain("导出当前")
 
@@ -179,11 +181,14 @@ describe("UnifiedSkillLibraryView", () => {
     await flushEffects()
 
     const actions = container.querySelector<HTMLElement>('[data-testid="skill-library-header-actions"]')
-    expect(actions?.textContent).toContain("新建 Skill")
-    expect(actions?.textContent).toContain("导入 Skill")
-    expect(actions?.textContent).toContain("导入文件")
-    expect(actions?.textContent).toContain("导入文件夹")
-    expect(actions?.textContent).toContain("导出当前")
+    const actionLabels = Array.from(actions?.querySelectorAll("button") ?? [])
+      .map((button) => button.textContent?.trim())
+
+    expect(actionLabels).toEqual(["新建 Skill", "导入"])
+    expect(actions?.textContent).not.toContain("导入 Skill")
+    expect(actions?.textContent).not.toContain("导入文件")
+    expect(actions?.textContent).not.toContain("导入文件夹")
+    expect(actions?.textContent).not.toContain("导出当前")
     expect(actions?.textContent).not.toContain("新建技能")
 
     cleanup(root, container)
@@ -223,7 +228,7 @@ describe("UnifiedSkillLibraryView", () => {
     const { container, root } = await renderLibrary()
 
     await act(async () => {
-      getButton(container, "导入文件")?.click()
+      getButton(container, "导入")?.click()
     })
     await flushEffects()
 
@@ -281,6 +286,32 @@ describe("UnifiedSkillLibraryView", () => {
     expect(useWikiStore.getState().activeView).toBe("skillLibrary")
     expect(useWikiStore.getState().selectedSkillLibrarySkillId).toBe("project:quiet")
     expect(container.querySelector('[data-testid="skill-library-view"]')).not.toBeNull()
+
+    cleanup(root, container)
+  })
+
+  it("marks a de-AI entry as current after switching from a writing entry", async () => {
+    const { container, root } = await renderLibrary()
+    const writingEntry = container.querySelector<HTMLElement>('[data-testid="unified-skill-entry-writing:skill:three"]')
+    const deAiEntry = container.querySelector<HTMLElement>('[data-testid="unified-skill-entry-de-ai:project:quiet"]')
+
+    await act(async () => {
+      writingEntry?.click()
+    })
+    await flushEffects()
+
+    expect(writingEntry?.getAttribute("aria-current")).toBe("true")
+
+    await act(async () => {
+      deAiEntry?.click()
+    })
+    await flushEffects()
+
+    expect(useWikiStore.getState().activeView).toBe("skillLibrary")
+    expect(useWikiStore.getState().selectedSkillLibrarySkillId).toBe("project:quiet")
+    expect(useWikiStore.getState().selectedWritingSkillLibrarySkillId).toBeNull()
+    expect(deAiEntry?.getAttribute("aria-current")).toBe("true")
+    expect(writingEntry?.getAttribute("aria-current")).toBeNull()
 
     cleanup(root, container)
   })

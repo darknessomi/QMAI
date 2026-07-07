@@ -7,7 +7,6 @@ import {
   deleteWritingSkill,
   deleteSkillCategory,
   exportSkillToJson,
-  importLinkedSkill,
   importSkillFromJson,
   importWritingSkill,
   loadAllLinkedSkillsContent,
@@ -407,43 +406,7 @@ export function WritingSkillLibrarySidebarPanel() {
       }
       await persist(next, next.selectedSkillId)
     } catch {
-      setMessage("导入 Skill 失败")
-    }
-  }
-
-  async function handleImportFolder() {
-    if (!config || !project || saving) return
-    if (draftDirty && !confirmDiscardSkillLibraryDraft()) return
-    if (draftDirty) setDraftDirty(false)
-    try {
-      const selected = await open({
-        multiple: false,
-        directory: true,
-      })
-      if (!selected || typeof selected !== "string") return
-      let next = await importLinkedSkill(config, selected)
-      const newSkillId = next.selectedSkillId
-      if (!newSkillId) {
-        setMessage("导入失败：文件夹中未找到有效的 Skill 文件")
-        return
-      }
-      if (selectedCategoryId !== "all" && selectedCategoryId !== "uncategorized") {
-        next = moveSkillToCategory(next, newSkillId, selectedCategoryId)
-      }
-      const newSkill = next.skills.find((s) => s.id === newSkillId)
-      if (newSkill && newSkill.source === "linked") {
-        try {
-          const content = await loadLinkedSkillContent(newSkill)
-          const updatedSkills = next.skills.map((s) =>
-            s.id === newSkillId ? { ...s, content } : s
-          )
-          next = { ...next, skills: updatedSkills }
-        } catch {
-        }
-      }
-      await persist(next, newSkillId)
-    } catch {
-      setMessage("导入失败：文件夹中未找到有效的 Skill 文件")
+      setMessage("导入失败")
     }
   }
 
@@ -637,15 +600,7 @@ export function WritingSkillLibrarySidebarPanel() {
             disabled={!config || !project || saving}
             className="rounded-md border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
           >
-            导入文件
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleImportFolder()}
-            disabled={!config || !project || saving}
-            className="rounded-md border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
-          >
-            导入文件夹
+            导入
           </button>
           <button
             type="button"

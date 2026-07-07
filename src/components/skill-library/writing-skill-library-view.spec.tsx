@@ -96,6 +96,20 @@ describe("WritingSkillLibraryView", () => {
     ;(useWikiStore.getState() as any).setSelectedWritingSkillLibrarySkillId?.(null)
   })
 
+  it("shows one import action in the writing skill sidebar", async () => {
+    const { container, root } = await renderLibrary()
+    const sidebarButtons = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .map((button) => button.textContent?.trim())
+
+    expect(sidebarButtons).toContain("导入")
+    expect(sidebarButtons).toContain("新建 Skill")
+    expect(sidebarButtons).not.toContain("导入文件")
+    expect(sidebarButtons).not.toContain("导入文件夹")
+    expect(container.textContent).not.toContain("导出当前")
+
+    cleanup(root, container)
+  })
+
   it("creates and saves a classified writing skill", async () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1234)
     const { container, root } = await renderLibrary()
