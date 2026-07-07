@@ -147,14 +147,34 @@ describe("AI chat workflow convergence", () => {
       "trim_context",
     ]))
     expect(result.enabledToolNames).not.toContain("write_chapter")
-    expect(result.selectedCapabilities).toContainEqual(expect.objectContaining({ kind: "user_skill", skillId: "output" }))
+    expect(result.enabledToolNames).not.toContain("run_chapter_workflow")
+    expect((result.selectedCapabilities ?? []).some((item) => item.kind === "user_skill")).toBe(false)
   })
 
-  it("standard next chapter enables writing context, selected skill, and write confirmation tool", async () => {
+  it("standard next chapter uses the old fast lightweight workflow route", async () => {
     const result = await runWorkflow({
       userMessage: "帮我写下一章",
       intent: "write_chapter",
       mode: "standard",
+      skills: [threeTurnsSkill(), outputSkill()],
+    })
+
+    expect(result.enabledToolNames).toEqual(expect.arrayContaining([
+      "read_chapter",
+      "read_outline",
+      "load_context",
+      "trim_context",
+    ]))
+    expect(result.enabledToolNames).not.toContain("write_chapter")
+    expect(result.enabledToolNames).not.toContain("apply_skill")
+    expect(result.selectedCapabilities).toContainEqual(expect.objectContaining({ kind: "user_skill", skillId: "output" }))
+  })
+
+  it("strict next chapter enables writing workflow, selected skill, and write confirmation tool", async () => {
+    const result = await runWorkflow({
+      userMessage: "帮我写下一章",
+      intent: "write_chapter",
+      mode: "strict",
       skills: [threeTurnsSkill(), outputSkill()],
     })
 

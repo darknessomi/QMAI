@@ -91,4 +91,164 @@ describe("SelectCapabilitiesPlugin", () => {
     ]))
     expect(result.enabledToolNames).toContain("mcp_graph_query_graph")
   })
+
+  it("filters out writing tools during plan phase in standard mode", async () => {
+    const plugin = createSelectCapabilitiesPlugin()
+    const availableCapabilities = buildAvailableCapabilities({
+      toolNames: [
+        "read_chapter",
+        "read_outline",
+        "load_context",
+        "trim_context",
+        "run_chapter_workflow",
+      ],
+    })
+
+    const result = await plugin.run({
+      userMessage: "写第一章",
+      projectPath: "/project",
+      agentConfig: {} as any,
+      novelMode: true,
+      aiWorkflowMode: "standard",
+      planExecuteEnabled: true,
+      availableCapabilities,
+      selectedSkills: [],
+      taskRoute: { intent: "write_chapter", confidence: 0.9, extractedParams: {} },
+    })
+
+    const toolNames = result.selectedCapabilities
+      .map((c) => c.toolName)
+      .filter((n): n is string => Boolean(n))
+
+    expect(toolNames).toContain("read_chapter")
+    expect(toolNames).toContain("read_outline")
+    expect(toolNames).toContain("load_context")
+    expect(toolNames).toContain("trim_context")
+    expect(toolNames).not.toContain("run_chapter_workflow")
+
+    expect(result.enabledToolNames).not.toContain("run_chapter_workflow")
+    expect(result.enabledToolNames).toContain("read_chapter")
+  })
+
+  it("filters out writing tools during plan phase in strict mode", async () => {
+    const plugin = createSelectCapabilitiesPlugin()
+    const availableCapabilities = buildAvailableCapabilities({
+      toolNames: [
+        "read_chapter",
+        "read_outline",
+        "read_memory",
+        "search_chapters",
+        "list_chapters",
+        "list_outlines",
+        "list_memories",
+        "load_context",
+        "trim_context",
+        "write_chapter",
+        "apply_skill",
+        "run_chapter_workflow",
+      ],
+    })
+
+    const result = await plugin.run({
+      userMessage: "写第一章",
+      projectPath: "/project",
+      agentConfig: {} as any,
+      novelMode: true,
+      aiWorkflowMode: "strict",
+      planExecuteEnabled: true,
+      availableCapabilities,
+      selectedSkills: [],
+      taskRoute: { intent: "write_chapter", confidence: 0.9, extractedParams: {} },
+    })
+
+    const toolNames = result.selectedCapabilities
+      .map((c) => c.toolName)
+      .filter((n): n is string => Boolean(n))
+
+    expect(toolNames).toContain("read_chapter")
+    expect(toolNames).toContain("read_outline")
+    expect(toolNames).toContain("read_memory")
+    expect(toolNames).toContain("search_chapters")
+    expect(toolNames).toContain("list_chapters")
+    expect(toolNames).toContain("list_outlines")
+    expect(toolNames).toContain("list_memories")
+    expect(toolNames).toContain("load_context")
+    expect(toolNames).toContain("trim_context")
+    expect(toolNames).not.toContain("write_chapter")
+    expect(toolNames).not.toContain("apply_skill")
+    expect(toolNames).not.toContain("run_chapter_workflow")
+  })
+
+  it("allows writing tools when plan execute is disabled in standard mode", async () => {
+    const plugin = createSelectCapabilitiesPlugin()
+    const availableCapabilities = buildAvailableCapabilities({
+      toolNames: [
+        "read_chapter",
+        "read_outline",
+        "load_context",
+        "trim_context",
+        "run_chapter_workflow",
+      ],
+    })
+
+    const result = await plugin.run({
+      userMessage: "写第一章",
+      projectPath: "/project",
+      agentConfig: {} as any,
+      novelMode: true,
+      aiWorkflowMode: "standard",
+      planExecuteEnabled: false,
+      availableCapabilities,
+      selectedSkills: [],
+      taskRoute: { intent: "write_chapter", confidence: 0.9, extractedParams: {} },
+    })
+
+    const toolNames = result.selectedCapabilities
+      .map((c) => c.toolName)
+      .filter((n): n is string => Boolean(n))
+
+    expect(toolNames).toContain("run_chapter_workflow")
+    expect(toolNames).toContain("read_chapter")
+  })
+
+  it("allows writing tools when plan execute is disabled in strict mode", async () => {
+    const plugin = createSelectCapabilitiesPlugin()
+    const availableCapabilities = buildAvailableCapabilities({
+      toolNames: [
+        "read_chapter",
+        "read_outline",
+        "read_memory",
+        "search_chapters",
+        "list_chapters",
+        "list_outlines",
+        "list_memories",
+        "load_context",
+        "trim_context",
+        "write_chapter",
+        "apply_skill",
+        "run_chapter_workflow",
+      ],
+    })
+
+    const result = await plugin.run({
+      userMessage: "写第一章",
+      projectPath: "/project",
+      agentConfig: {} as any,
+      novelMode: true,
+      aiWorkflowMode: "strict",
+      planExecuteEnabled: false,
+      availableCapabilities,
+      selectedSkills: [],
+      taskRoute: { intent: "write_chapter", confidence: 0.9, extractedParams: {} },
+    })
+
+    const toolNames = result.selectedCapabilities
+      .map((c) => c.toolName)
+      .filter((n): n is string => Boolean(n))
+
+    expect(toolNames).toContain("write_chapter")
+    expect(toolNames).toContain("apply_skill")
+    expect(toolNames).toContain("run_chapter_workflow")
+    expect(toolNames).toContain("read_chapter")
+  })
 })

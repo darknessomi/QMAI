@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import { X, Check, SkipForward, Edit3, ListChecks } from "lucide-react"
+import type { AiWorkflowMode, LegacyAiWorkflowMode } from "@/lib/agent/workflow-mode"
+import { getWorkflowModeLabel, resolveAiWorkflowMode } from "@/lib/agent/workflow-mode"
 export { buildChapterPlanSelfCheckPrompt } from "@/lib/novel/chapter-plan-self-check"
 
 export const CHAPTER_PLAN_MARKER_START = "<!-- chapter_plan -->"
@@ -62,7 +64,7 @@ export function isChapterPlanExecutionFollowup(content: string): boolean {
 interface ChapterPlanConfirmDialogProps {
   open: boolean
   planContent: string
-  aiWorkflowMode: "fast" | "standard" | "strict"
+  aiWorkflowMode: LegacyAiWorkflowMode
   onConfirm: () => void
   onSkip: () => void
   onModify?: (modifiedPlan: string) => void
@@ -82,6 +84,8 @@ export function ChapterPlanConfirmDialog({
   onRevisePlan,
   onCancel,
 }: ChapterPlanConfirmDialogProps) {
+  const resolvedAiWorkflowMode: AiWorkflowMode = resolveAiWorkflowMode(aiWorkflowMode)
+  const workflowModeLabel = getWorkflowModeLabel(resolvedAiWorkflowMode)
   const [editing, setEditing] = useState(false)
   const [editedContent, setEditedContent] = useState(planContent)
   const [selfChecking, setSelfChecking] = useState(false)
@@ -169,7 +173,7 @@ export function ChapterPlanConfirmDialog({
             <div>
               <h3 className="font-semibold">章节创作计划</h3>
               <p className="text-xs text-muted-foreground">
-                {aiWorkflowMode === "strict" ? "严格模式" : "标准模式"} · 请确认 AI 的创作计划
+                {workflowModeLabel}模式 · 请确认 AI 的创作计划
               </p>
             </div>
           </div>

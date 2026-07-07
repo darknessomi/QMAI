@@ -116,6 +116,48 @@ describe("agent stage stream integration", () => {
     expect(html).toContain("这是最终正文。")
   })
 
+  it("keeps write approval actions visible when structured stages are present", () => {
+    const message: DisplayMessage = {
+      id: "assistant-approval",
+      role: "assistant",
+      content: "等待确认保存。",
+      timestamp: 1,
+      conversationId: "conv-1",
+      agentStages: [
+        {
+          id: "write_confirmation",
+          title: "写入确认",
+          status: "approval_required",
+          summary: "等待用户确认写入。",
+          events: [],
+        },
+      ],
+      agentToolCalls: [
+        {
+          id: "write-approval",
+          name: "write_chapter",
+          params: { name: "第1章", content: "正文" },
+          result: "预览内容",
+          status: "approval_required",
+          startedAt: 1,
+          finishedAt: 2,
+        },
+      ],
+    }
+
+    const html = renderToStaticMarkup(
+      <ChatMessage
+        message={message}
+        onConfirmToolSave={() => {}}
+        onRejectTool={() => {}}
+      />,
+    )
+
+    expect(html).toContain("写入确认")
+    expect(html).toContain("确认保存")
+    expect(html).toContain("放弃")
+  })
+
   it("keeps old tool workflow fallback when structured stages are absent", () => {
     const message: DisplayMessage = {
       id: "assistant-2",

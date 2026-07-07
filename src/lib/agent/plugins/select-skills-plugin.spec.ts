@@ -31,7 +31,7 @@ const availableSkills = [
 ]
 
 describe("SelectSkillsPlugin", () => {
-  it("selects standard writing skills for next chapter generation", async () => {
+  it("selects old fast lightweight skills for standard mode", async () => {
     const plugin = createSelectSkillsPlugin()
 
     const result = await plugin.run({
@@ -45,17 +45,12 @@ describe("SelectSkillsPlugin", () => {
     })
 
     expect(result.selectedSkills?.map((item) => item.name)).toEqual([
-      "章节承接",
-      "下一章计划",
-      "人物动机",
-      "冲突升级",
-      "剧情自检",
       "正文输出协议",
-      "世界观资料",
+      "去AI味",
     ])
   })
 
-  it("supplements standard writing with uploaded writing skills such as 三翻四抖", async () => {
+  it("does not supplement standard lightweight writing with uploaded skills", async () => {
     const plugin = createSelectSkillsPlugin()
 
     const result = await plugin.run({
@@ -80,10 +75,13 @@ describe("SelectSkillsPlugin", () => {
       taskRoute: { intent: "write_chapter", confidence: 0.95, extractedParams: {} },
     })
 
-    expect(result.selectedSkills?.map((item) => item.name)).toContain("三翻四抖")
+    expect(result.selectedSkills?.map((item) => item.name)).toEqual([
+      "正文输出协议",
+      "去AI味",
+    ])
   })
 
-  it("keeps fast mode to output and optional style skills", async () => {
+  it("does not auto-select skills in fast mode", async () => {
     const plugin = createSelectSkillsPlugin()
 
     const result = await plugin.run({
@@ -96,10 +94,7 @@ describe("SelectSkillsPlugin", () => {
       taskRoute: { intent: "write_chapter", confidence: 0.95, extractedParams: {} },
     })
 
-    expect(result.selectedSkills?.map((item) => item.name)).toEqual([
-      "正文输出协议",
-      "去AI味",
-    ])
+    expect(result.selectedSkills).toEqual([])
   })
 
   it("selects strict review and structure skills for key chapter writing", async () => {

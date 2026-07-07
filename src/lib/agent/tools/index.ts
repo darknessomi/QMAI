@@ -1,6 +1,6 @@
 import type { ToolRegistry } from "../registry"
 import type { AgentToolEvent, Tool } from "../types"
-import type { AiWorkflowMode } from "@/lib/agent/workflow-mode"
+import type { LegacyAiWorkflowMode } from "@/lib/agent/workflow-mode"
 import { createReadChapterTool } from "./read-chapter"
 import { createReadOutlineTool } from "./read-outline"
 import { createReadMemoryTool } from "./read-memory"
@@ -53,7 +53,7 @@ export interface ToolFactoryOptions {
   enabledToolNames?: string[]
   disabledTools?: string[]
   llmConfig?: LlmConfig
-  aiWorkflowMode?: AiWorkflowMode
+  aiWorkflowMode?: LegacyAiWorkflowMode
   runDeepChapterGeneration?: RunDeepChapterGeneration
   onToolEvent?: (event: AgentToolEvent) => void
   getPlanBlueprint?: () => string | undefined

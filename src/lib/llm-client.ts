@@ -422,7 +422,7 @@ export async function streamChat(
         // Stream reader threw a network error mid-response (connection
         // dropped, server closed early, network blip). Same message
         // regardless of whether the webview is WebKit or Chromium.
-        onError(new Error("Connection lost during streaming. Try again."))
+        onError(new Error("流式响应读取中断，请检查网络、代理或接口稳定性后重试。"))
         return
       }
       onError(err instanceof Error ? err : new Error(String(err)))

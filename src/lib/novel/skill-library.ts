@@ -1,4 +1,4 @@
-import type { AiWorkflowMode } from "@/lib/agent/workflow-mode"
+import type { LegacyAiWorkflowMode } from "@/lib/agent/workflow-mode"
 
 export type SkillKind =
   | "style"
@@ -16,7 +16,7 @@ export type SkillStage =
   | "rewrite"
   | "output"
 
-export type SkillMode = AiWorkflowMode
+export type SkillMode = LegacyAiWorkflowMode
 
 export interface SkillCategory {
   id: string

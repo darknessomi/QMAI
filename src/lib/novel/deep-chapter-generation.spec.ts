@@ -965,7 +965,7 @@ describe("runDeepChapterGeneration", () => {
     expect(overrides[1]).toEqual({ reasoning: { mode: "off" } })
   })
 
-  it("uses separate workflow routes for fast standard and strict modes", async () => {
+  it("uses fast, standard, and strict workflow routes", async () => {
     const fastDeps = createDeps()
     await runDeepChapterGeneration(
       { projectPath: "E:/Novel", userRequest: "生成第三章", chapterNumber: 3, llmConfig, aiWorkflowMode: "fast" },
@@ -981,7 +981,7 @@ describe("runDeepChapterGeneration", () => {
       {},
       standardDeps,
     )
-    expect(standardDeps.streamChat).toHaveBeenCalledTimes(3)
+    expect(standardDeps.streamChat).toHaveBeenCalledTimes(2)
     expect(standardDeps.reviewChapter).not.toHaveBeenCalled()
 
     const strictDeps = createDeps()
@@ -1065,8 +1065,9 @@ describe("runDeepChapterGeneration", () => {
       { onWorkflowEvent: (event) => standardEvents.push(event) },
       createDeps(),
     )
-    expect(standardEvents.find((event) => event.name === "chapter_review")?.result).toContain("标准模式跳过")
-    expect(standardEvents.find((event) => event.name === "chapter_final_polish" && event.result)?.result).toContain("简单审查与去AI味完成")
+    expect(standardEvents.some((event) => event.name === "chapter_review")).toBe(false)
+    expect(standardEvents.some((event) => event.name === "chapter_final_polish")).toBe(false)
+    expect(standardEvents.find((event) => event.name === "chapter_complete")?.result).toContain("标准模式写作完成")
   })
 
   it("keeps fast mode on a lightweight route without post-draft plan audits", async () => {

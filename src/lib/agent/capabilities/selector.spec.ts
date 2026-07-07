@@ -59,7 +59,7 @@ describe("AI capability selector", () => {
     expect(JSON.stringify(capabilities)).not.toContain("private skill content")
   })
 
-  it("keeps fast writing mode to minimal read/context tools and selected output skills", () => {
+  it("keeps fast writing mode to minimal read/context tools without selected skills", () => {
     const outputSkill = normalizeUserSkill({
       id: "output",
       name: "Output Protocol",
@@ -86,8 +86,8 @@ describe("AI capability selector", () => {
       "tool:read_outline",
       "tool:load_context",
       "tool:trim_context",
-      "skill:output",
     ]))
+    expect(selected.map((item) => item.id)).not.toContain("skill:output")
     expect(selected.some((item) => item.kind === "web_search")).toBe(false)
     expect(selected.some((item) => item.kind === "mcp_tool")).toBe(false)
     expect(JSON.stringify(selected)).not.toContain("private output instructions")
@@ -117,21 +117,28 @@ describe("AI capability selector", () => {
     ]))
   })
 
-  it("selects chapter workflow tool for chapter writing intents", () => {
+  it("selects chapter workflow tool for standard and strict chapter writing intents", () => {
     const capabilities = buildAvailableCapabilities({
       toolNames: ["read_chapter", "run_chapter_workflow"],
       selectedSkills: [],
       mcpCapabilities: [],
     })
 
-    const selected = selectCapabilities({
+    const standardSelected = selectCapabilities({
       capabilities,
       intent: "write_chapter",
       mode: "standard",
       userMessage: "生成第3章",
     })
+    const strictSelected = selectCapabilities({
+      capabilities,
+      intent: "write_chapter",
+      mode: "strict",
+      userMessage: "生成第3章",
+    })
 
-    expect(selected.map((item) => item.toolName)).toContain("run_chapter_workflow")
+    expect(standardSelected.map((item) => item.toolName)).toContain("run_chapter_workflow")
+    expect(strictSelected.map((item) => item.toolName)).toContain("run_chapter_workflow")
   })
 
   it("allows strict knowledge tasks to select future MCP placeholders without executing MCP", () => {

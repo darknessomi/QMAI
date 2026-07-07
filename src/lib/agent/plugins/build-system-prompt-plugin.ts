@@ -1,7 +1,7 @@
   import type { PrePlugin, PrePluginInput, PrePluginOutput } from "../pipeline"
 import { buildTaskDirective } from "@/lib/novel/task-router"
 import { buildSelectedSkillsPrompt } from "./select-skills-plugin"
-import type { AiWorkflowMode } from "../workflow-mode"
+import { getWorkflowModeLabel, resolveAiWorkflowMode, type LegacyAiWorkflowMode } from "../workflow-mode"
 import { WRITING_INTENTS } from "../plan-execute-policy"
 
   export interface BuildSystemPromptPluginDeps {
@@ -62,10 +62,9 @@ export function createBuildSystemPromptPlugin(deps: BuildSystemPromptPluginDeps 
   }
 }
 
-function buildChapterPlanProtocol(mode: AiWorkflowMode): string {
+function buildChapterPlanProtocol(mode: LegacyAiWorkflowMode): string {
   // mode 仅用于在协议头标注当前工作流强度，不改变计划结构。
-  const modeLabel =
-    mode === "fast" ? "快速" : mode === "strict" ? "严格" : "标准"
+  const modeLabel = getWorkflowModeLabel(resolveAiWorkflowMode(mode))
   return [
     "## 章节主编策划协议（本章策划案）",
     "",
@@ -74,7 +73,7 @@ function buildChapterPlanProtocol(mode: AiWorkflowMode): string {
     "",
     "输出规范：",
     "1. 计划必须整体包裹在 `<!-- chapter_plan -->` 和 `<!-- /chapter_plan -->` 标记中。",
-    "2. 计划只供用户确认，正文生成必须等用户确认后再开始。",
+    "2. 计划只供用户确认，正文生成必须等待用户确认后再开始。当前阶段禁用正文生成类工具，只能使用读取类工具收集资料。",
     "3. 计划必须基于会话上下文包；读取资料前先用 list_chapters、list_outlines、list_memories 确认可用文件名，绝不编造资料名称。",
     "4. 计划总长控制在 1200-1800字，避免堆砌分析维度；用结论和执行项表达。",
     "5. 场景必须用 S1/S2/S3 编号，后续正文会按编号执行。",

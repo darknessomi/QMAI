@@ -1,6 +1,24 @@
 import type { PrePlugin, PrePluginInput, PrePluginOutput } from "../pipeline"
 import { buildAvailableCapabilities } from "../capabilities/registry"
 import { selectCapabilities } from "../capabilities/selector"
+import { resolveAiWorkflowMode } from "../workflow-mode"
+
+const PLAN_PHASE_ALLOWED_TOOLS = new Set([
+  "read_chapter",
+  "read_outline",
+  "read_memory",
+  "read_deduction",
+  "read_chat_history",
+  "read_outline_history",
+  "list_chapters",
+  "list_outlines",
+  "list_memories",
+  "list_deductions",
+  "search_chapters",
+  "load_context",
+  "trim_context",
+  "web_search",
+])
 
 export function createSelectCapabilitiesPlugin(): PrePlugin {
   return {
@@ -21,14 +39,21 @@ export function createSelectCapabilitiesPlugin(): PrePlugin {
       const selectedCapabilities = selectCapabilities({
         capabilities: availableCapabilities,
         intent: route.intent,
-        mode: input.aiWorkflowMode ?? "standard",
+        mode: resolveAiWorkflowMode(input.aiWorkflowMode),
         userMessage: input.userMessage,
         blockedSources: input.blockedSources as any,
       })
 
+      const isPlanPhase = Boolean(input.planExecuteEnabled)
+      const filteredCapabilities = isPlanPhase
+        ? selectedCapabilities.filter(
+            (cap) => cap.toolName && PLAN_PHASE_ALLOWED_TOOLS.has(cap.toolName),
+          )
+        : selectedCapabilities
+
       return {
-        selectedCapabilities,
-        enabledToolNames: selectedCapabilities
+        selectedCapabilities: filteredCapabilities,
+        enabledToolNames: filteredCapabilities
           .map((capability) => capability.toolName)
           .filter((name): name is string => Boolean(name)),
       }

@@ -16,7 +16,7 @@ describe("workflow mode", () => {
     expect(resolveAiWorkflowMode(true)).toBe("strict")
   })
 
-  it("accepts explicit workflow modes without changing them", () => {
+  it("accepts explicit active workflow modes without changing them", () => {
     const modes: AiWorkflowMode[] = ["fast", "standard", "strict"]
 
     expect(modes.map(resolveAiWorkflowMode)).toEqual(modes)

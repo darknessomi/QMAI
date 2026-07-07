@@ -102,4 +102,29 @@ describe("BuildSystemPromptPlugin selected skills", () => {
     const finalPrompt = result.finalSystemPrompt ?? ""
     expect(finalPrompt.length).toBeLessThan(3000)
   })
+
+  it.each(["fast", "standard", "strict"] as const)(
+    "injects chapter plan protocol when Plan Execute is enabled with %s mode",
+    async (mode) => {
+      const plugin = createBuildSystemPromptPlugin({
+        baseSystemPrompt: "base prompt",
+        buildTaskDirectiveFn: () => "task directive",
+      })
+
+      const result = await plugin.run({
+        userMessage: "帮我写下一章",
+        projectPath: "/project",
+        agentConfig: {} as any,
+        novelMode: true,
+        aiWorkflowMode: mode,
+        planExecuteEnabled: true,
+        taskRoute: { intent: "write_chapter", confidence: 0.9, extractedParams: {} },
+      })
+
+      expect(result.finalSystemPrompt).toContain("章节主编策划协议")
+      expect(result.finalSystemPrompt).toContain("<!-- chapter_plan -->")
+      expect(result.finalSystemPrompt).toContain("<!-- /chapter_plan -->")
+      expect(result.finalSystemPrompt).toContain("等待用户确认")
+    },
+  )
 })

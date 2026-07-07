@@ -1,6 +1,6 @@
 import type { DataSourceCategory } from "@/lib/novel/classification"
 import type { NovelTaskIntent } from "@/lib/novel/task-router"
-import type { AiWorkflowMode } from "../workflow-mode"
+import { resolveAiWorkflowMode, type AiWorkflowMode, type LegacyAiWorkflowMode } from "../workflow-mode"
 import type { AiCapability, SelectedCapabilityTrace } from "./types"
 
 const WRITING_INTENTS = new Set<NovelTaskIntent>([
@@ -19,8 +19,9 @@ const KNOWLEDGE_INTENTS = new Set<NovelTaskIntent>([
   "setting_query",
 ])
 
-const FAST_WRITING_TOOLS = new Set(["read_chapter", "read_outline", "load_context", "trim_context", "run_chapter_workflow"])
-const STANDARD_WRITING_TOOLS = new Set([
+const FAST_WRITING_TOOLS = new Set(["read_chapter", "read_outline", "load_context", "trim_context"])
+const STANDARD_WRITING_TOOLS = new Set(["read_chapter", "read_outline", "load_context", "trim_context", "run_chapter_workflow"])
+const STRICT_WRITING_TOOLS = new Set([
   "read_chapter",
   "read_outline",
   "read_memory",
@@ -44,7 +45,7 @@ const STRICT_EXTRA_TOOLS = new Set([
 export interface SelectCapabilitiesInput {
   capabilities: AiCapability[]
   intent: NovelTaskIntent
-  mode: AiWorkflowMode
+  mode: LegacyAiWorkflowMode
   userMessage: string
   blockedSources?: DataSourceCategory[]
 }
@@ -52,10 +53,11 @@ export interface SelectCapabilitiesInput {
 export function selectCapabilities(input: SelectCapabilitiesInput): SelectedCapabilityTrace[] {
   const blockedSources = new Set(input.blockedSources ?? [])
   const selected: SelectedCapabilityTrace[] = []
+  const resolvedInput = { ...input, mode: resolveAiWorkflowMode(input.mode) }
 
   for (const capability of input.capabilities) {
-    if (!capability.modes.includes(input.mode)) continue
-    const reason = selectionReason(capability, input, blockedSources)
+    if (!capability.modes.includes(resolvedInput.mode)) continue
+    const reason = selectionReason(capability, resolvedInput, blockedSources)
     if (!reason) continue
     selected.push(toTrace(capability, reason))
   }
@@ -65,7 +67,7 @@ export function selectCapabilities(input: SelectCapabilitiesInput): SelectedCapa
 
 function selectionReason(
   capability: AiCapability,
-  input: SelectCapabilitiesInput,
+  input: SelectCapabilitiesInput & { mode: AiWorkflowMode },
   blockedSources: Set<DataSourceCategory>,
 ): string | null {
   if (capability.kind === "mcp_tool") {
@@ -87,9 +89,10 @@ function selectionReason(
 
   if (capability.kind === "user_skill") {
     if (!capability.intents.includes(input.intent) && !capability.intents.includes("general")) return null
-    if (input.mode === "fast") return "fast mode selected only preselected lightweight skills"
+    if (input.mode === "fast") return null
+    if (input.mode === "standard") return "standard mode selected lightweight skill"
     if (input.mode === "strict") return "strict mode selected preselected skill"
-    return "standard mode selected preselected skill"
+    return null
   }
 
   if (capability.kind === "built_in_tool") {
@@ -107,8 +110,12 @@ function builtInToolReason(capability: AiCapability, input: SelectCapabilitiesIn
     return FAST_WRITING_TOOLS.has(name) ? "fast mode minimal writing context" : null
   }
 
+  if (input.mode === "standard" && WRITING_INTENTS.has(input.intent)) {
+    return STANDARD_WRITING_TOOLS.has(name) ? "standard mode lightweight writing workflow" : null
+  }
+
   if (WRITING_INTENTS.has(input.intent)) {
-    if (STANDARD_WRITING_TOOLS.has(name)) return "writing task capability"
+    if (STRICT_WRITING_TOOLS.has(name)) return "writing task capability"
     if (input.mode === "strict" && STRICT_EXTRA_TOOLS.has(name)) return "strict mode extended writing context"
     return null
   }

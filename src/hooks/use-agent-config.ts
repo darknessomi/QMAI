@@ -145,6 +145,7 @@ export function useAgentConfig(systemPrompt: string, getPlanBlueprint?: () => st
       draftMode: novelMode,
       projectPath: normalizePath(projectPath),
       getPlanBlueprint,
+      disabledTools: ["write_chapter", "write_outline_node", "write_memory"],
     })
 
     return {

@@ -1,4 +1,4 @@
-import type { AiWorkflowMode } from "../workflow-mode"
+import type { LegacyAiWorkflowMode } from "../workflow-mode"
 import type { NovelTaskIntent } from "@/lib/novel/task-router"
 
 export type CapabilityKind =
@@ -18,7 +18,7 @@ export interface AiCapability {
   name: string
   kind: CapabilityKind
   permission: CapabilityPermission
-  modes: AiWorkflowMode[]
+  modes: LegacyAiWorkflowMode[]
   intents: CapabilityIntent[]
   toolName?: string
   skillId?: string

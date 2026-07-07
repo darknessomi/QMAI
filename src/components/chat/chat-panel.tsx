@@ -1,9 +1,8 @@
-﻿import { useRef, useEffect, useCallback, useState, useMemo, type CSSProperties } from "react"
+import { useRef, useEffect, useCallback, useState, useMemo, type CSSProperties } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { BookOpen, Plus, Trash2, MessageSquare, FileEdit, Drama, ListChecks, ChevronDown, Check, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ChatMessage, StreamingMessage } from "./chat-message"
 import { ChatDockControls } from "./chat-dock-controls"
@@ -100,8 +99,6 @@ import { buildInitialContextTraceInfo } from "@/lib/agent/context-trace-builders
 import { runPostWriteCheckAI } from "@/lib/agent/plugins/post-write-check-ai"
 import { buildSelectedSkillsPrompt } from "@/lib/agent/plugins/select-skills-plugin"
 import { buildResultProtocolTrace } from "@/lib/novel/result-parser"
-import { validateChapterBeforeSave } from "@/lib/novel/result-save-guard"
-import { confirmDraft } from "@/lib/novel/draft-manager"
 // import { getLoadedCategories, DATA_SOURCE_CATEGORY_LABELS } from "@/lib/novel/classification"
 // import { RetrievalStore } from "@/lib/novel/retrieval"
 // import { RetrievalStatusIndicator } from "@/components/novel/retrieval-status-indicator"
@@ -127,14 +124,14 @@ const aiWorkflowModeOptions: Array<{
   {
     mode: "fast",
     label: "快速",
-    description: "轻量直出",
-    routeDescription: "读取上下文、生成任务书和正文初稿后直接完成，不做正文后审核。",
+    description: "普通对话",
+    routeDescription: "快速模式像普通对话一样直接出结果，可读取上下文，但不自动启用 Skill、不走多任务写作循环、不分析剧情走向。",
   },
   {
     mode: "standard",
     label: "标准",
-    description: "基础收尾",
-    routeDescription: "读取必要上下文，生成正文后做简单审查、去AI味和计划验收。",
+    description: "轻量直出",
+    routeDescription: "读取上下文、生成任务书和正文初稿后直接完成，不做正文后审核。",
   },
   {
     mode: "strict",
@@ -283,21 +280,25 @@ function buildChatAgentSystemPrompt(options: {
     lines.push("小说模式下，如果用户要求生成、续写或改写章节，只输出可直接放入章节库的正文。")
     lines.push("章节生成、续写或改写任务的最终回复必须只包含章节正文，不要把工具读取过程、写作计划或执行过程展示给用户。")
     lines.push("不要输出读取说明、执行总结、完成目标表格、章节结构、后续建议、引用来源或 Markdown 表格；章节标题和正文以外的内容都不要输出。")
-    lines.push("章节生成、续写、改写或润色应优先调用 run_chapter_workflow 工具。")
+    if (options.aiWorkflowMode === "fast") {
+      lines.push("快速模式下可以读取必要上下文；除非用户明确要求使用工作流或 Skill，否则不要主动调用 run_chapter_workflow。")
+    } else {
+      lines.push("章节生成、续写、改写或润色应优先调用 run_chapter_workflow 工具。")
+    }
   }
   if (options.aiWorkflowMode) {
     switch (options.aiWorkflowMode) {
       case "fast":
-        lines.push("快速模式：优先直接回答或生成，减少非必要分析。")
+        lines.push("快速模式：像普通对话一样直接出结果，不自动启用 Skill，不走多任务写作循环，不分析剧情走向。")
         break
       case "standard":
-        lines.push("标准模式：读取必要上下文，生成正文后执行基础自检与简单去AI味。")
+        lines.push("标准模式：读取上下文，生成任务书和正文初稿后直接完成，不做正文后审核。")
         break
       case "strict":
         lines.push("严格模式：读取更完整上下文，执行更严格的审稿、返修和一致性检查。如果有外部搜索需求，必须使用 web_search 工具，不得声称已经搜索。未使用联网资料时，在回复末尾注明。")
         break
       }
-    if (options.planExecuteEnabled) {
+    if (options.planExecuteEnabled && options.aiWorkflowMode !== "fast") {
       lines.push(buildPlanExecutePolicyPrompt(options.aiWorkflowMode))
     }
   }
@@ -692,7 +693,6 @@ export function ChatPanel() {
   const activeStreamSessionsRef = useRef<Record<string, number>>({})
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const soulDialogResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
   const userScrolledUpRef = useRef(false)
   const lastScrollTopRef = useRef(0)
 
@@ -707,7 +707,6 @@ export function ChatPanel() {
   const planExecuteEnabled = useWikiStore((s) => s.planExecuteEnabled)
   const setPlanExecuteEnabled = useWikiStore((s) => s.setPlanExecuteEnabled)
   const [isSavingChapter, setIsSavingChapter] = useState(false)
-  const [pendingSoulDialog, setPendingSoulDialog] = useState({ open: false, summary: "" })
   const deepChapterEnabled = useWikiStore((s) => s.deepChapterEnabled)
   // 故事框架绑定状态
   const [activeBinding, setActiveBinding] = useState<{ binding: FrameworkBinding; framework: StoryFramework } | null>(null)
@@ -808,7 +807,7 @@ export function ChatPanel() {
         deepChapterEnabled,
         chatEditModeEnabled,
         aiWorkflowMode,
-        planExecuteEnabled,
+        planExecuteEnabled: aiWorkflowMode !== "fast" && planExecuteEnabled,
         projectName: project?.name,
         bindingTitle: activeBinding?.framework.title,
       }),
@@ -890,20 +889,6 @@ export function ChatPanel() {
     ],
     [agentSkillConfig, conversations, outlineConversations],
   )
-  const closeSoulDialog = useCallback((confirmed: boolean) => {
-    const resolver = soulDialogResolverRef.current
-    soulDialogResolverRef.current = null
-    setPendingSoulDialog({ open: false, summary: "" })
-    resolver?.(confirmed)
-  }, [])
-
-  const requestSoulDialog = useCallback((summary: string) => {
-    setPendingSoulDialog({ open: true, summary })
-    return new Promise<boolean>((resolve) => {
-      soulDialogResolverRef.current = resolve
-    })
-  }, [])
-
   // === Stage C: 章节计划确认 ===
   const [pendingChapterPlan, setPendingChapterPlan] = useState<{
     open: boolean
@@ -927,10 +912,6 @@ export function ChatPanel() {
 
   useEffect(() => {
     return () => {
-      if (soulDialogResolverRef.current) {
-        soulDialogResolverRef.current(false)
-        soulDialogResolverRef.current = null
-      }
       if (chapterPlanResolverRef.current) {
         chapterPlanResolverRef.current("cancel")
         chapterPlanResolverRef.current = null
@@ -1095,7 +1076,8 @@ export function ChatPanel() {
       const plainText = text.trim()
       const userVisibleText = (displayText ?? plainText).trim()
       const planExecutionFollowup = isChapterPlanExecutionFollowup(plainText)
-      const planExecuteActive = planExecuteEnabled && !planExecutionFollowup
+      const planExecuteActive =
+        aiWorkflowMode !== "fast" && planExecuteEnabled && !planExecutionFollowup
       setDeAiSkillWarningMessage("")
 
       if (!plainText) {
@@ -1208,7 +1190,7 @@ export function ChatPanel() {
       void contextPack
       let novelContextPrompt: string = ""
       let prePluginResult: PrePluginChainResult | null = null
-      const shouldRunNovelPrePluginChain = novelMode
+      const shouldRunNovelPrePluginChain = novelMode && (aiWorkflowMode !== "fast" || planExecuteActive)
       void shouldRunNovelPrePluginChain
       abortControllersRef.current[capturedConvId] = controller
       let hasAgentError = false
@@ -1281,7 +1263,7 @@ export function ChatPanel() {
           }
         : taskRoute
 
-      if (novelMode && effectiveTaskRoute) {
+      if (shouldRunNovelPrePluginChain && effectiveTaskRoute) {
         try {
           prePluginResult = await runNovelPrePluginChain({
             input: {
@@ -1376,21 +1358,6 @@ export function ChatPanel() {
             nextChapterAdvice: "",
             revisionDirectives: "",
           }))
-          if (aiWorkflowMode !== "fast" && contextPack.characterAuras.trim()) {
-            const confirmed = await requestSoulDialog(contextPack.characterAuras)
-            if (!confirmed) {
-              finishAgentSession(() => {
-                updateAgentAssistantMessage(assistantMessage.id, (message) => ({
-                  ...message,
-                  content: "已取消本次生成，角色灵魂上下文未发送给模型。",
-                  agentToolCalls: settleRunningAgentToolCalls(message.agentToolCalls, "cancelled"),
-                  agentStages: settleRunningAgentStages(message.agentStages, "cancelled"),
-                  isAgentRunning: false,
-                }))
-              })
-              return
-            }
-          }
           const novelConfig = useWikiStore.getState().novelConfig
           const budget = novelConfig.contextTokenBudget > 0 ? novelConfig.contextTokenBudget : undefined
           novelContextPrompt = [
@@ -1506,7 +1473,11 @@ export function ChatPanel() {
             if (contextTrace && effectiveTaskRoute) {
               const traceInfo = buildInitialContextTraceInfo(effectiveTaskRoute, prePluginResult, { workflowMode: aiWorkflowMode })
               contextTrace = setContextInfo(contextTrace, traceInfo)
-              const finalContent = assistantMessage.content || ""
+              const storeStateForValidation = useChatStore.getState()
+              const lastAssistantForValidation = storeStateForValidation.messages.find(
+                (m) => m.id === assistantMessage.id && m.role === "assistant",
+              )
+              const finalContent = lastAssistantForValidation?.content ?? ""
               if (finalContent) {
                 const protocolTrace = buildResultProtocolTrace("chapter", finalContent)
                 contextTrace = setContextInfo(contextTrace, { ...traceInfo, resultProtocol: protocolTrace })
@@ -1517,12 +1488,7 @@ export function ChatPanel() {
                 effectiveTaskRoute.intent === "write_chapter" ||
                 effectiveTaskRoute.intent === "continue_chapter"
               ) {
-                // 与 Stage C 一致：从 store 读取最终内容（闭包 assistantMessage 不会随流式更新）
-                const storeState = useChatStore.getState()
-                const lastAssistant = storeState.messages.find(
-                  (m) => m.id === assistantMessage.id && m.role === "assistant",
-                )
-                const chapterContent = lastAssistant?.content ?? ""
+                const chapterContent = finalContent
                 // 排除含 chapter_plan 标记的内容（计划本身不是正文）与空内容
                 const hasChapterPlanMarker = chapterContent.includes("chapter_plan")
                 if (chapterContent && !hasChapterPlanMarker) {
@@ -1621,7 +1587,6 @@ export function ChatPanel() {
       projectPath,
       referenceDraftConversationId,
       requestChapterPlanConfirm,
-      requestSoulDialog,
       selectedFile,
       setActiveConversation,
       setConversationInputDraft,
@@ -1715,19 +1680,6 @@ export function ChatPanel() {
     await handleSendRef.current(prompt, [], "继续未完成")
   }, [isStreaming])
 
-
-
-  const handleConfirmToolSave = useCallback(async (_projectPath: string) => {
-    // validate chapter before confirming save
-    const draft = ""
-    const validation = validateChapterBeforeSave(draft)
-    if (!validation.ok) {
-      console.warn("Chapter validation failed:", validation.trace)
-      return    }
-    if (!project) return
-    await confirmDraft(project.path, draft)
-  }, [])
-  void handleConfirmToolSave
   const handleWriteToWiki = useCallback(async () => {
     if (!project) return
     const pp = normalizePath(project.path)
@@ -1913,15 +1865,16 @@ export function ChatPanel() {
                               type="button"
                               variant="ghost"
                               size="sm"
-                              aria-pressed={planExecuteEnabled}
+                              aria-pressed={planExecuteEnabled && aiWorkflowMode !== "fast"}
+                              disabled={aiWorkflowMode === "fast"}
                               className={`h-8 shrink-0 rounded-full border px-2.5 text-xs ${
-                                planExecuteEnabled
+                                planExecuteEnabled && aiWorkflowMode !== "fast"
                                   ? "border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground"
                                   : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
-                              }`}
+                              } disabled:cursor-not-allowed disabled:opacity-50`}
                               onClick={() => setPlanExecuteEnabled(!planExecuteEnabled)}
-                              title={planExecuteEnabled ? "关闭计划执行模式" : "开启计划执行模式"}
-                              aria-label={planExecuteEnabled ? "关闭计划执行模式" : "开启计划执行模式"}
+                              title={aiWorkflowMode === "fast" ? "快速模式下不支持计划执行，请切换到标准或严格模式" : planExecuteEnabled ? "关闭计划执行模式" : "开启计划执行模式"}
+                              aria-label={aiWorkflowMode === "fast" ? "快速模式下不支持计划执行，请切换到标准或严格模式" : planExecuteEnabled ? "关闭计划执行模式" : "开启计划执行模式"}
                             />
                           )}
                         >
@@ -1929,7 +1882,9 @@ export function ChatPanel() {
                           计划执行
                         </TooltipTrigger>
                         <TooltipContent side="top" className="max-w-xs leading-5">
-                          开启后，本次写作会先创建计划，等待确认后再执行；可与快速、标准、严格任一模式组合使用。
+                          {aiWorkflowMode === "fast"
+                            ? "快速模式下不支持计划执行，请切换到标准或严格模式。"
+                            : "开启后，本次写作会先创建计划，等待确认后再执行；可与标准、严格模式组合使用。"}
                         </TooltipContent>
                       </Tooltip>
                       <Tooltip>
@@ -2001,7 +1956,7 @@ export function ChatPanel() {
             <ReferenceInput
               value={referenceText}
               tokens={currentTokens}
-              disabled={isStreaming || pendingChapterPlan.open || pendingSoulDialog.open}
+              disabled={isStreaming || pendingChapterPlan.open}
               isStreaming={isStreaming}
               onStop={handleStop}
               rightControls={
@@ -2036,23 +1991,6 @@ export function ChatPanel() {
             onClose={() => setReferencePickerOpen(false)}
           />
         </div>
-        <Dialog open={pendingSoulDialog.open} onOpenChange={(open) => { if (!open) closeSoulDialog(false) }}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>本次写作将注入角色灵魂上下文</DialogTitle>
-              <DialogDescription>
-                下列内容会进入本次写作上下文包。角色灵魂会增强人物气质、语言倾向和判断方式，但仍服从大纲、人物小传与当前剧情。
-              </DialogDescription>
-            </DialogHeader>
-            <div className="max-h-72 overflow-y-auto rounded-md border bg-muted/20 p-3 text-xs leading-6 text-muted-foreground whitespace-pre-wrap">
-              {pendingSoulDialog.summary}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => closeSoulDialog(false)}>取消本次生成</Button>
-              <Button onClick={() => closeSoulDialog(true)}>继续生成</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
         {pendingChapterPlan.open && (
           <ChapterPlanConfirmDialog
             open={pendingChapterPlan.open}

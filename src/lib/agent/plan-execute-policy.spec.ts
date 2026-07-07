@@ -11,12 +11,13 @@ describe("Plan Execute policy", () => {
   it("creates a lightweight plan in fast mode when Plan Execute is enabled", () => {
     expect(shouldRequirePlan(true, "fast", "write_chapter")).toBe(true)
     expect(buildPlanExecutePolicyPrompt("fast")).toContain("快速模式")
-    expect(buildPlanExecutePolicyPrompt("fast")).toContain("先创建轻量计划")
+    expect(buildPlanExecutePolicyPrompt("fast")).toContain("先给出最短可执行计划")
   })
 
-  it("requires a short plan in standard mode when Plan Execute is enabled", () => {
+  it("creates a lightweight plan in standard mode when Plan Execute is enabled", () => {
     expect(shouldRequirePlan(true, "standard", "write_chapter")).toBe(true)
-    expect(buildPlanExecutePolicyPrompt("standard")).toContain("先给出简短计划")
+    expect(buildPlanExecutePolicyPrompt("standard")).toContain("标准模式")
+    expect(buildPlanExecutePolicyPrompt("standard")).toContain("先创建轻量计划")
   })
 
   it("requires plan execute and review in strict mode when Plan Execute is enabled", () => {
@@ -33,4 +34,15 @@ describe("Plan Execute policy", () => {
     expect(prompt).toContain("确认后动作")
     expect(prompt).toContain("不要把工具流程说明当成计划")
   })
+
+  it.each(["fast", "standard", "strict"] as const)(
+    "requires extractable chapter plan markers in %s mode",
+    (mode) => {
+      const prompt = buildPlanExecutePolicyPrompt(mode)
+
+      expect(prompt).toContain("<!-- chapter_plan -->")
+      expect(prompt).toContain("<!-- /chapter_plan -->")
+      expect(prompt).toContain("等待用户确认")
+    },
+  )
 })

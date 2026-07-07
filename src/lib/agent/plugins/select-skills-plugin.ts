@@ -1,5 +1,5 @@
 import type { PrePlugin, PrePluginInput, PrePluginOutput } from "../pipeline"
-import type { AiWorkflowMode } from "../workflow-mode"
+import { resolveAiWorkflowMode, type AiWorkflowMode, type LegacyAiWorkflowMode } from "../workflow-mode"
 import type { NovelTaskIntent } from "@/lib/novel/task-router"
 import type { SkillKind, SkillStage, UserSkill } from "@/lib/novel/skill-library"
 
@@ -53,7 +53,7 @@ export function createSelectSkillsPlugin(): PrePlugin {
       const availableSkills = input.availableSkills ?? []
       if (availableSkills.length === 0) return { selectedSkills: [] }
 
-      const mode = input.aiWorkflowMode ?? "standard"
+      const mode = resolveAiWorkflowMode(input.aiWorkflowMode)
       return {
         selectedSkills: selectSkillsForRoute(availableSkills, route.intent, mode),
       }
@@ -64,50 +64,53 @@ export function createSelectSkillsPlugin(): PrePlugin {
 export function selectSkillsForRoute(
   skills: UserSkill[],
   intent: NovelTaskIntent,
-  mode: AiWorkflowMode,
+  mode: LegacyAiWorkflowMode,
 ): UserSkill[] {
-  const modeSkills = skills.filter((skill) => skill.modes.includes(mode))
+  const resolvedMode = resolveAiWorkflowMode(mode)
+  if (resolvedMode === "fast") return []
+
+  const modeSkills = skills.filter((skill) => skill.modes.includes(resolvedMode))
   if (modeSkills.length === 0) return []
 
   if (WRITING_INTENTS.has(intent)) {
-    return selectWritingSkills(modeSkills, mode)
+    return selectWritingSkills(modeSkills, resolvedMode)
   }
 
   if (intent === "generate_outline") {
-    return selectByShape(modeSkills, mode, {
+    return selectByShape(modeSkills, resolvedMode, {
       kinds: ["planning", "structure", "output"],
       stages: ["planning", "output"],
-      limit: mode === "strict" ? 8 : 5,
+      limit: resolvedMode === "strict" ? 8 : 5,
     })
   }
 
   if (REVIEW_INTENTS.has(intent)) {
-    return selectByShape(modeSkills, mode, {
+    return selectByShape(modeSkills, resolvedMode, {
       kinds: ["review", "knowledge", "output"],
       stages: ["review", "output"],
-      limit: mode === "strict" ? 8 : 5,
+      limit: resolvedMode === "strict" ? 8 : 5,
     })
   }
 
   if (QUERY_INTENTS.has(intent)) {
-    return selectByShape(modeSkills, mode, {
+    return selectByShape(modeSkills, resolvedMode, {
       kinds: ["knowledge", "review", "output"],
       stages: ["planning", "review", "output"],
-      limit: mode === "strict" ? 6 : 3,
+      limit: resolvedMode === "strict" ? 6 : 3,
     })
   }
 
   return []
 }
 
-function selectWritingSkills(skills: UserSkill[], mode: AiWorkflowMode): UserSkill[] {
-  if (mode === "fast") {
+function selectWritingSkills(skills: UserSkill[], mode: Exclude<AiWorkflowMode, "fast">): UserSkill[] {
+  if (mode === "standard") {
     return selectPreferredNames(skills, FAST_WRITING_SKILL_NAMES, 3, false)
   }
   if (mode === "strict") {
     return selectPreferredNames(skills, STRICT_WRITING_SKILL_NAMES, 12)
   }
-  return selectPreferredNames(skills, STANDARD_WRITING_SKILL_NAMES, 8)
+  return []
 }
 
 function selectPreferredNames(skills: UserSkill[], names: string[], limit: number, fillWithRelevant = true): UserSkill[] {
@@ -140,7 +143,7 @@ function selectPreferredNames(skills: UserSkill[], names: string[], limit: numbe
 
 function selectByShape(
   skills: UserSkill[],
-  mode: AiWorkflowMode,
+  mode: Exclude<AiWorkflowMode, "fast">,
   options: { kinds: SkillKind[]; stages: SkillStage[]; limit: number },
 ): UserSkill[] {
   return skills
@@ -159,7 +162,7 @@ function isWritingSkill(skill: UserSkill): boolean {
 
 function scoreSkill(
   skill: UserSkill,
-  mode: AiWorkflowMode,
+  mode: Exclude<AiWorkflowMode, "fast">,
   options: { kinds: SkillKind[]; stages: SkillStage[] },
 ): number {
   let score = 0

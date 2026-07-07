@@ -161,8 +161,8 @@ export function ChatMessage({
             <>
               {message.agentStages && message.agentStages.length > 0 ? (
                 <AgentStageStream stages={message.agentStages} />
-              ) : message.agentToolCalls &&
-                message.agentToolCalls.length > 0 ? (
+              ) : null}
+              {message.agentToolCalls && message.agentToolCalls.length > 0 ? (
                 <AgentToolCallMessage
                   toolCalls={message.agentToolCalls}
                   contextTrace={message.contextTrace}

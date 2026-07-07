@@ -6,7 +6,7 @@ import {
   type StreamCallbacks,
 } from "@/lib/llm-client";
 import { useWikiStore } from "@/stores/wiki-store";
-import type { AiWorkflowMode } from "@/lib/agent/workflow-mode";
+import { resolveAiWorkflowMode, type AiWorkflowMode, type LegacyAiWorkflowMode } from "@/lib/agent/workflow-mode";
 import type { AgentActivityEvent, AgentActivityKind } from "@/lib/agent/types";
 import {
   isReasoningDisabled,
@@ -59,7 +59,7 @@ export interface DeepChapterGenerationInput {
   goldenThreeChapter?: GoldenThreeChapterRequest;
   dismantlingReferenceDirective?: string;
   llmConfig: LlmConfig;
-  aiWorkflowMode?: AiWorkflowMode;
+  aiWorkflowMode?: LegacyAiWorkflowMode;
   resumeCheckpoint?: DeepChapterGenerationResumeCheckpoint;
   /** 用户在会话层确认的章节计划，作为写作任务书的权威依据注入 brief 阶段。 */
   planBlueprint?: string;
@@ -226,9 +226,9 @@ interface ChapterWorkflowProfile {
 }
 
 function resolveChapterWorkflowProfile(
-  mode: AiWorkflowMode | undefined,
+  mode: LegacyAiWorkflowMode | undefined,
 ): ChapterWorkflowProfile {
-  const resolvedMode = mode ?? "strict";
+  const resolvedMode = mode == null ? "strict" : resolveAiWorkflowMode(mode);
   if (resolvedMode === "fast") {
     return {
       mode: "fast",
@@ -246,13 +246,13 @@ function resolveChapterWorkflowProfile(
     return {
       mode: "standard",
       runPreviousChaptersAnalysis: false,
-      runExecutionContractBuild: true,
+      runExecutionContractBuild: false,
       runAiReview: false,
-      runFinalPolish: true,
+      runFinalPolish: false,
       runPostRevisionReview: false,
-      runPostDraftPlanAudits: true,
-      completionTitle: "完成多任务写作循环",
-      completionResultPrefix: "多任务写作循环完成",
+      runPostDraftPlanAudits: false,
+      completionTitle: "完成标准写作",
+      completionResultPrefix: "标准模式写作完成",
     };
   }
   return {

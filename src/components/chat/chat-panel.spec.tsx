@@ -83,19 +83,23 @@ describe("chat-panel agent reference integration", () => {
     expect(source).toContain("不要输出读取说明、执行总结、完成目标表格、章节结构、后续建议")
   })
 
-  it("uses the three-level AI workflow mode instead of a single deep mode prompt", () => {
+  it("uses three AI workflow modes instead of a single deep mode prompt", () => {
     expect(source).toContain("aiWorkflowMode")
     expect(source).toContain("setAiWorkflowMode")
     expect(source).toContain("快速模式")
     expect(source).toContain("标准模式")
     expect(source).toContain("严格模式")
+    expect(source).toContain('label: "标准"')
+    expect(source).toContain('mode: "standard"')
     expect(source).not.toContain("用户已开启深度模式，请在必要时进行更完整的章节规划和资料读取。")
   })
 
   it("shows route descriptions in the workflow mode menu", () => {
+    expect(source).toContain("description: \"普通对话")
     expect(source).toContain("description: \"轻量直出")
-    expect(source).toContain("description: \"基础收尾")
     expect(source).toContain("description: \"完整质检")
+    expect(source).toContain("快速模式像普通对话一样直接出结果")
+    expect(source).toContain("读取上下文、生成任务书和正文初稿后直接完成")
     expect(source).toContain("workflowModeDropdownStyle.width")
     expect(source).toContain("routeDescription")
   })
@@ -109,25 +113,29 @@ describe("chat-panel agent reference integration", () => {
     expect(source).toContain("prePluginResult?.selectedSkills")
   })
 
-  it("keeps Plan Execute as an independent switch outside fast standard strict modes", () => {
+  it("keeps Plan Execute as an independent switch outside fast and strict modes", () => {
     expect(source).toContain("planExecuteEnabled")
     expect(source).toContain("setPlanExecuteEnabled")
     expect(source).toContain("aiSessionPlanExecuteLabel")
     expect(source).toContain("计划执行")
-    expect(source).toContain("aria-pressed={planExecuteEnabled}")
+    expect(source).toContain("aria-pressed={planExecuteEnabled && aiWorkflowMode !== \"fast\"}")
+    expect(source).toContain("disabled={aiWorkflowMode === \"fast\"}")
   })
 
-  it("injects Plan Execute policy only when the independent switch is enabled", () => {
+  it("injects Plan Execute policy only when the independent switch is enabled and not in fast mode", () => {
     expect(source).toContain("buildPlanExecutePolicyPrompt")
-    expect(source).toContain("options.planExecuteEnabled")
+    expect(source).toContain("options.planExecuteEnabled && options.aiWorkflowMode !== \"fast\"")
     expect(source).toContain("run_chapter_workflow")
     expect(source).not.toContain("标准模式：复杂小说任务先给出简短计划")
     expect(source).not.toContain("严格模式：复杂小说任务必须先规划")
   })
 
-  it("makes standard mode include final simple review and de-AI polish without implying Plan Execute", () => {
-    expect(source).toContain("标准模式：读取必要上下文，生成正文后执行基础自检与简单去AI味。")
-    expect(source).not.toContain("标准模式：复杂小说任务先给出简短计划")
+  it("makes fast mode behave like ordinary chat without automatic skill or review loop", () => {
+    expect(source).toContain("快速模式：像普通对话一样直接出结果")
+    expect(source).toContain("不自动启用 Skill")
+    expect(source).toContain("不走多任务写作循环")
+    expect(source).toContain("不分析剧情走向")
+    expect(source).toContain("标准模式：读取上下文，生成任务书和正文初稿后直接完成，不做正文后审核。")
   })
 
   it("keeps configured reasoning without imposing an app-side output token cap for chapter generation", () => {
@@ -192,13 +200,27 @@ describe("chat-panel agent reference integration", () => {
     expect(source).toContain('rawTaskRoute.intent !== "general_chat"')
     expect(source).toContain("const taskRoute = shouldRunNovelPrePluginChain ? rawTaskRoute : null")
 
-    const guardIndex = source.indexOf("const shouldRunNovelPrePluginChain")
+    const guardIndex = source.lastIndexOf("const shouldRunNovelPrePluginChain")
     const runIndex = source.indexOf("await runNovelPrePluginChain({")
-    const virtualRouteIndex = source.indexOf("if (novelMode && effectiveTaskRoute)")
+    const guardedRunIndex = source.indexOf("if (shouldRunNovelPrePluginChain && effectiveTaskRoute)")
 
     expect(guardIndex).toBeGreaterThan(-1)
     expect(runIndex).toBeGreaterThan(-1)
-    expect(virtualRouteIndex).toBeLessThan(runIndex)
+    expect(guardedRunIndex).toBeGreaterThan(guardIndex)
+    expect(guardedRunIndex).toBeLessThan(runIndex)
+  })
+
+  it("does not run the novel pre-plugin chain in fast mode even when Plan Execute is enabled", () => {
+    expect(source).toContain("aiWorkflowMode !== \"fast\" && planExecuteEnabled")
+    const planExecuteActiveMatch = source.match(/planExecuteActive\s*=/)
+    expect(planExecuteActiveMatch).not.toBeNull()
+    const planExecuteActiveLine = source.slice(
+      (planExecuteActiveMatch?.index ?? 0),
+      (planExecuteActiveMatch?.index ?? 0) + 200,
+    )
+    expect(planExecuteActiveLine).toContain("aiWorkflowMode !== \"fast\"")
+    expect(planExecuteActiveLine).toContain("planExecuteEnabled")
+    expect(planExecuteActiveLine).toContain("planExecutionFollowup")
   })
 
   it("passes workflow mode and available skills into the novel pre-plugin chain", () => {
@@ -218,14 +240,10 @@ describe("chat-panel agent reference integration", () => {
     expect(source).toContain("prePluginSystemPrompt")
   })
 
-  it("skips the character soul confirmation dialog in fast workflow mode", () => {
-    expect(source).toContain('aiWorkflowMode !== "fast"')
-    expect(source).toContain('contextPack.characterAuras.trim()')
-    const guardIndex = source.indexOf('aiWorkflowMode !== "fast"')
-    const requestIndex = source.indexOf("await requestSoulDialog(contextPack.characterAuras)")
-    expect(guardIndex).toBeGreaterThan(-1)
-    expect(requestIndex).toBeGreaterThan(-1)
-    expect(guardIndex).toBeLessThan(requestIndex)
+  it("does not show the character soul confirmation dialog in any workflow mode", () => {
+    expect(source).not.toContain("pendingSoulDialog")
+    expect(source).not.toContain("requestSoulDialog")
+    expect(source).not.toContain("本次写作将注入角色灵魂上下文")
   })
 
   it("passes MCP capabilities from agent config into the novel pre-plugin chain", () => {
@@ -272,7 +290,7 @@ describe("chat-panel agent reference integration", () => {
 
   it("settles visible tool calls when generation is cancelled from any chat confirmation path", () => {
     expect(source).toContain('agentToolCalls: settleRunningAgentToolCalls(message.agentToolCalls, "cancelled")')
-    expect(source).toContain("content: \"已取消本次生成，角色灵魂上下文未发送给模型。\"")
+    expect(source).toContain("已取消计划执行，未进入正文生成。")
     expect(source).toContain("已停止生成。")
   })
 
@@ -304,14 +322,12 @@ describe("chat-panel agent reference integration", () => {
     expect(source).not.toContain("await runDeepChapterGeneration(")
   })
 
-  it("validates chapter content before confirming draft saves", () => {
-    const confirmIndex = source.indexOf("const handleConfirmToolSave")
-    const validationIndex = source.indexOf("validateChapterBeforeSave", confirmIndex)
-    const confirmDraftIndex = source.indexOf("confirmDraft(project.path", confirmIndex)
-
-    expect(confirmIndex).toBeGreaterThan(-1)
-    expect(validationIndex).toBeGreaterThan(confirmIndex)
-    expect(validationIndex).toBeLessThan(confirmDraftIndex)
+  it("does not include write tool confirmation handlers (write tools disabled)", () => {
+    expect(source).not.toContain("const handleConfirmToolSave")
+    expect(source).not.toContain("extractDraftIdFromWritePreview")
+    expect(source).not.toContain("confirmDraft(project.path, draftId")
+    expect(source).not.toContain("onConfirmToolSave={handleConfirmToolSave}")
+    expect(source).not.toContain("onRejectTool={handleRejectTool}")
   })
 
   it("keeps up to three working or today's conversations in the top toolbar and moves the rest into history", () => {
@@ -390,9 +406,9 @@ describe("chat-panel chapter plan confirm integration (Stage C)", () => {
     expect(afterPlanConfirm).toContain("setActiveConversation(capturedConvId)")
   })
 
-  it("disables Plan Execute protocol for confirmed plan follow-up messages to avoid planning loops", () => {
+  it("disables Plan Execute protocol for confirmed plan follow-up messages and fast mode", () => {
     expect(source).toContain("isChapterPlanExecutionFollowup")
-    expect(source).toContain("const planExecuteActive = planExecuteEnabled && !planExecutionFollowup")
+    expect(source).toContain("aiWorkflowMode !== \"fast\" && planExecuteEnabled && !planExecutionFollowup")
     expect(source).toContain("planExecuteEnabled: planExecuteActive")
   })
 
@@ -437,11 +453,14 @@ describe("chat-panel post-write check integration (Stage D)", () => {
     expect(stageDBlock).not.toContain("rewrite_chapter")
   })
 
-  it("reads the final assistant content from the store (same as Stage C)", () => {
+  it("reads the final assistant content from the store before Stage D (shared with format validation)", () => {
     const stageDIndex = source.indexOf("=== Stage D: 写后剧情自检 ===")
+    const beforeStageDBlock = source.slice(0, stageDIndex)
+    expect(beforeStageDBlock).toContain("useChatStore.getState()")
+    expect(beforeStageDBlock).toContain("lastAssistantForValidation")
+    expect(beforeStageDBlock).toContain("finalContent = lastAssistantForValidation?.content ??")
     const stageDBlock = source.slice(stageDIndex, stageDIndex + 1200)
-    expect(stageDBlock).toContain("useChatStore.getState()")
-    expect(stageDBlock).toContain("lastAssistant")
+    expect(stageDBlock).toContain("const chapterContent = finalContent")
   })
 
   it("excludes content carrying the chapter_plan marker", () => {
@@ -496,16 +515,16 @@ describe("aiWorkflowMode store 读取", () => {
 })
 
 describe("resolver 卸载清理", () => {
-  it("useEffect 卸载钩子中清理 pending resolver", () => {
-    expect(source).toMatch(/soulDialogResolverRef\.current = null/)
+  it("useEffect 卸载钩子中清理章节计划 pending resolver", () => {
     expect(source).toMatch(/chapterPlanResolverRef\.current = null/)
-    expect(source).toMatch(/return \(\) => \{[\s\S]*?ResolverRef\.current/)
+    expect(source).toMatch(/return \(\) => \{[\s\S]*?chapterPlanResolverRef\.current/)
   })
 })
 
-describe("SoulDialog 输入框禁用一致性", () => {
-  it("pendingSoulDialog.open 时禁用主输入框", () => {
-    expect(source).toMatch(/disabled=\{isStreaming \|\| pendingChapterPlan\.open \|\| pendingSoulDialog\.open\}/)
+describe("章节计划弹窗输入框禁用一致性", () => {
+  it("pendingChapterPlan.open 时禁用主输入框", () => {
+    expect(source).toMatch(/disabled=\{isStreaming \|\| pendingChapterPlan\.open\}/)
+    expect(source).not.toContain("pendingSoulDialog.open")
   })
 })
 
