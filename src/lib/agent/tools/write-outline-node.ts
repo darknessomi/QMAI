@@ -1,5 +1,45 @@
 import type { Tool } from "../types"
 import { readFile, writeFile, fileExists } from "@/commands/fs"
+import { isLikelyChapterOutline, summarizeChapterOutlineQuality } from "@/lib/novel/outline-quality-check"
+
+export function buildOutlineNodeWriteContent(nodeTitle: string, nodeContent: string): string {
+  const trimmed = nodeContent.trim()
+  if (/^#{1,6}\s+/.test(trimmed)) return `${trimmed}\n`
+  return `## ${nodeTitle}\n\n${trimmed}\n`
+}
+
+export function validateOutlineWriteTarget(outlineName: string): string | null {
+  const normalized = outlineName.replace(/\\/g, "/").trim()
+  if (!normalized) return "大纲文件名称不能为空。"
+  if (normalized.startsWith("/") || /^[a-zA-Z]:\//.test(normalized)) {
+    return "大纲文件名称不能使用绝对路径。"
+  }
+  if (normalized.split("/").some((part) => part === "..")) {
+    return "大纲文件名称不能包含上级目录。"
+  }
+  if (!normalized.toLowerCase().endsWith(".md")) {
+    return "大纲文件名称必须是 Markdown 文件。"
+  }
+  return null
+}
+
+function buildChapterOutlineQualityText(outlineName: string, content: string): string {
+  if (!isLikelyChapterOutline(content, outlineName)) return ""
+  const quality = summarizeChapterOutlineQuality(content)
+  if (quality.valid && quality.warnings.length === 0) {
+    return "\n\n章纲质量检查：通过。"
+  }
+  const lines = ["", "", "章纲质量检查："]
+  if (quality.errors.length > 0) {
+    lines.push("错误：")
+    lines.push(...quality.errors.map((item) => `- ${item}`))
+  }
+  if (quality.warnings.length > 0) {
+    lines.push("警告：")
+    lines.push(...quality.warnings.map((item) => `- ${item}`))
+  }
+  return lines.join("\n")
+}
 
 export function createWriteOutlineNodeTool(outlinesDir: string): Tool {
   return {
@@ -16,27 +56,33 @@ export function createWriteOutlineNodeTool(outlinesDir: string): Tool {
       const outlineName = params.outlineName as string
       const nodeTitle = params.nodeTitle as string
       const nodeContent = params.nodeContent as string
+      const targetError = validateOutlineWriteTarget(outlineName)
+      if (targetError) return `无法写入大纲：${targetError}`
       const path = `${outlinesDir}/${outlineName}`
-      const newSection = `## ${nodeTitle}\n\n${nodeContent}\n`
-      let originalContent = ""
+      const newSection = buildOutlineNodeWriteContent(nodeTitle, nodeContent)
       try {
         if (await fileExists(path)) {
-          originalContent = await readFile(path)
+          const originalContent = await readFile(path)
+          const modeText = originalContent.includes(`## ${nodeTitle}`)
+            ? "目标文件已存在，确认后仍不会直接覆盖。请先在中间编辑区确认，或另存为新版本。"
+            : "目标文件已存在，确认后仍不会直接追加。请先选择覆盖、另存为新版本或追加修改说明。"
+          return `无法直接写入「${outlineName}」：${modeText}\n\n预览：\n${newSection}${buildChapterOutlineQualityText(outlineName, newSection)}`
         }
       } catch {}
-      if (originalContent.includes(`## ${nodeTitle}`)) {
-        return `将更新大纲节点「${nodeTitle}」到「${outlineName}」\n\n预览：\n${newSection}\n原文件将被更新。`
-      } else {
-        return `将追加大纲节点「${nodeTitle}」到「${outlineName}」\n\n预览：\n${newSection}`
-      }
+      return `将写入大纲「${outlineName}」\n\n预览：\n${newSection}${buildChapterOutlineQualityText(outlineName, newSection)}`
     },
     execute: async (params) => {
       const outlineName = params.outlineName as string
       const nodeTitle = params.nodeTitle as string
       const nodeContent = params.nodeContent as string
+      const targetError = validateOutlineWriteTarget(outlineName)
+      if (targetError) return `错误：${targetError}`
       const path = `${outlinesDir}/${outlineName}`
-      const content = `## ${nodeTitle}\n\n${nodeContent}\n`
+      const content = buildOutlineNodeWriteContent(nodeTitle, nodeContent)
       try {
+        if (await fileExists(path)) {
+          return `错误：「${outlineName}」已存在。请选择覆盖、另存为新版本或追加修改说明后再保存，系统不会静默覆盖已有章纲。`
+        }
         await writeFile(path, content)
         const verified = await readFile(path)
         if (verified !== content) {

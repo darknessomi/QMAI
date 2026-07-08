@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
 const source = readFileSync(resolve(__dirname, "outline-chat-panel.tsx"), "utf8")
-const outlineGenerationSource = readFileSync(resolve(__dirname, "../../lib/novel/outline-generation.ts"), "utf8")
+const outlineSectionConfigsSource = readFileSync(resolve(__dirname, "../../lib/novel/outline-section-configs.ts"), "utf8")
 
 describe("OutlineChatPanel controls", () => {
   it("uses the shared accent new conversation button style", () => {
@@ -98,6 +98,8 @@ describe("OutlineChatPanel controls", () => {
     expect(source).toContain('"write_memory"')
     expect(source).toContain("disabledTools: OUTLINE_CHAT_DISABLED_TOOLS")
     expect(source).toContain("需要保存大纲时只能使用 write_outline_node")
+    expect(source).toContain("核心事件不少于6条")
+    expect(source).toContain("用户确认前不得生成完整文件")
   })
 
   it("keeps outline reference chips as tool-readable hints instead of preloading file contents", () => {
@@ -111,6 +113,12 @@ describe("OutlineChatPanel controls", () => {
     expect(source).toContain("msg.attachedReferences")
     expect(source).toContain("<ReferenceChip")
     expect(source).toContain("readonly")
+  })
+
+  it("consumes outline reference tokens sent from the left outline tree", () => {
+    expect(source).toContain("pendingReferenceTokens")
+    expect(source).toContain("consumePendingReferenceTokens")
+    expect(source).toContain("insertReferenceTokensRef.current?.(tokens)")
   })
 
   it("forces outline chat through a dedicated list-read-analyze-generate workflow", () => {
@@ -131,14 +139,94 @@ describe("OutlineChatPanel controls", () => {
     expect(source).toContain("最终回复只输出大纲标题和大纲正文")
     expect(source).toContain("禁止输出工具调用报告、分析过程、完成报告、下一步行动")
 
-    for (const title of ["章节细纲", "人物小传", "组织势力设定", "金手指与能力体系", "伏笔计划", "地点设定"]) {
-      expect(outlineGenerationSource).toContain(title)
+    for (const title of ["章节细纲", "人物小传", "组织势力设定", "力量体系", "金手指设定", "伏笔计划", "地点设定"]) {
+      expect(outlineSectionConfigsSource).toContain(title)
     }
+  })
+
+  it("locks outline generation to the upgraded staged workflow standard", () => {
+    expect(source).toContain("充分性闸门")
+    expect(source).toContain("先卷后章")
+    expect(source).toContain("卷节拍表")
+    expect(source).toContain("卷时间线")
+    expect(source).toContain("滚动章纲")
+    expect(source).toContain("新增设定写回")
+    expect(source).toContain("CBN")
+    expect(source).toContain("CPNs")
+    expect(source).toContain("CEN")
+    expect(source).toContain("CEN 必须能承接下一章 CBN")
   })
 
   it("lets outline chat bubbles expand to half of the window without overflowing narrow panels", () => {
     expect(source).toContain("lg:max-w-[50vw]")
     expect(source).toContain("max-w-full")
     expect(source).not.toContain("max-w-[85%]")
+  })
+
+  it("在 AI 大纲输入框上方接入固定生成向导并发送结构化 Prompt", () => {
+    expect(source).toContain('import { OutlineWizardDialog } from "@/components/sources/outline-wizard-dialog"')
+    expect(source).toContain("import {")
+    expect(source).toContain("buildOutlineWizardPrompt")
+    expect(source).toContain("选择生成你想要的小说")
+    expect(source).toContain("handleSubmitOutlineWizard")
+    expect(source).toContain("buildOutlineWizardPrompt(request)")
+    expect(source).toContain("disableWriteTools: true")
+    expect(source).toContain("OUTLINE_CHAT_WIZARD_DISABLED_TOOLS")
+    expect(source).toContain("<OutlineWizardDialog")
+  })
+
+  it("AI 大纲向导入口接入多 Agent 并行生成与单 Agent 回退提示", () => {
+    expect(source).toContain("planOutlineSubAgents")
+    expect(source).toContain("runOutlineMultiAgentWorkflow")
+    expect(source).toContain("await runOutlineMultiAgentWorkflow({")
+    expect(source).toContain("runSubAgent: async (subAgentPlan)")
+    expect(source).toContain("runSingleAgentFallback")
+    expect(source).toContain("mergeResults")
+    expect(source).toContain("enableMultiAgent: true")
+    expect(source).toContain("多 Agent 并行生成")
+    expect(source).toContain("自动回退为单 Agent")
+  })
+
+  it("keeps wizard prompt bubbles readable and stops streaming in the original conversation", () => {
+    expect(source).toContain("streamingConversationIdRef")
+    expect(source).toContain("streamingConversationIdRef.current = convId")
+    expect(source).toContain("streamingConversationIdRef.current ?? activeConversationId")
+    expect(source).toContain('className="block whitespace-pre-wrap break-words"')
+  })
+
+  it("saves AI outline results into the inferred outline category folder", () => {
+    expect(source).toContain("classifyOutlineSaveTarget")
+    expect(source).toContain("classification.targetFolder")
+    expect(source).toContain("classification.fileName")
+    expect(source).toContain("保存大纲文件")
+    expect(source).toContain("summarizeChapterOutlineQuality")
+    expect(source).toContain("formatChapterOutlineQualityReport")
+    expect(source).toContain("includeWarnings: true")
+  })
+
+  it("auto-saves structured AI outline save requests from assistant output", () => {
+    expect(source).toContain("parseOutlineSaveRequests")
+    expect(source).toContain("saveOutlineSaveRequests")
+    expect(source).toContain("outlineSaveRequest")
+    expect(source).toContain("已自动保存")
+    expect(source).toContain("AI 大纲输出协议")
+  })
+
+  it("uses save confirm dialog for classified outline saves", () => {
+    expect(source).toContain("OutlineSaveConfirmDialog")
+    expect(source).toContain("extractCharacterSaveDrafts")
+    expect(source).toContain("classifyOutlineSaveTarget")
+    expect(source).toContain("characterDraftsToSaveRequests")
+    expect(source).toContain("splitConfirmRequiredSaveRequests")
+  })
+
+  it("does not silently auto-save character requests without confirmation", () => {
+    expect(source).toContain("confirmRequired")
+    expect(source).toContain("请确认要保存的人物角色")
+  })
+
+  it("keeps a confirmation fallback when character extraction fails", () => {
+    expect(source).toContain("buildFallbackCharacterDraftsFromRequests")
+    expect(source).toContain("无法自动拆分角色")
   })
 })

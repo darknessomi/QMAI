@@ -1,3 +1,8 @@
+import {
+  isLikelyChapterOutline,
+  summarizeChapterOutlineQuality,
+} from "@/lib/novel/outline-quality-check"
+
 export interface ChapterValidationResult {
   valid: boolean
   hasFrontmatter: boolean
@@ -14,6 +19,7 @@ export interface OutlineValidationResult {
   valid: boolean
   hasStructure: boolean
   nodeCount: number
+  isChapterOutline: boolean
   warnings: string[]
   errors: string[]
 }
@@ -117,7 +123,7 @@ export function validateOutlineContent(content: string): OutlineValidationResult
 
   if (!trimmed) {
     errors.push("内容为空")
-    return { valid: false, hasStructure: false, nodeCount: 0, warnings, errors }
+    return { valid: false, hasStructure: false, nodeCount: 0, isChapterOutline: false, warnings, errors }
   }
 
   const headingRegex = /^#{1,6}\s+.+$/gm
@@ -134,12 +140,20 @@ export function validateOutlineContent(content: string): OutlineValidationResult
     warnings.push("大纲节点过少")
   }
 
+  const isChapterOutline = isLikelyChapterOutline(content)
+  if (isChapterOutline) {
+    const chapterQuality = summarizeChapterOutlineQuality(content)
+    errors.push(...chapterQuality.errors)
+    warnings.push(...chapterQuality.warnings)
+  }
+
   const valid = errors.length === 0 && hasStructure
 
   return {
     valid,
     hasStructure,
     nodeCount,
+    isChapterOutline,
     warnings,
     errors,
   }

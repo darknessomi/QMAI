@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import { normalizePath } from "@/lib/path-utils"
 
-export type ImportProgressKind = "chapter" | "outline" | "outline_generation" | "outline_refinement"
+export type ImportProgressKind = "chapter" | "outline"
 export type ImportProgressStatus = "running" | "done" | "cancelled" | "error"
 
 export interface ImportProgressTask {

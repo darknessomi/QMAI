@@ -30,7 +30,7 @@ import {
   saveDeAiSkillConfig,
   setLastChapterDeAiSkill,
 } from "@/lib/novel/de-ai-skill-library"
-import { startOutlineIngestTask } from "@/lib/novel/outline-generation"
+import { startOutlineIngestTask } from "@/lib/novel/outline-ingest"
 import { streamChat } from "@/lib/llm-client"
 import {
   extractChapterNumberFromMarkdown,

@@ -92,6 +92,26 @@ title: "第三章 初遇"
       expect(result.hasStructure).toBe(false)
       expect(result.warnings.some((w) => w.includes("未检测到标题结构"))).toBe(true)
     })
+
+    it("章纲内容应该执行章纲质量校验", () => {
+      const content = `# 章纲（第001章）
+
+## 本章目标
+
+- 剧情目标：主角接管账号
+
+## 核心事件
+
+- 事件1：
+  - 事件内容：主角拿到账号
+`
+      const result = validateOutlineContent(content)
+
+      expect(result.isChapterOutline).toBe(true)
+      expect(result.valid).toBe(false)
+      expect(result.errors.join("\n")).toContain("缺少「基础信息」章节")
+      expect(result.errors.join("\n")).toContain("核心事件至少需要 6 条")
+    })
   })
 
   describe("buildResultProtocolTrace", () => {

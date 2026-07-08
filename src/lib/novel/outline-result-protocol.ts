@@ -1,0 +1,156 @@
+export interface OutlineWritebackItem {
+  type: string
+  name: string
+  content: string
+  targetFolder: string
+}
+
+export interface OutlineSubAgentResult {
+  agentId: string
+  agentName: string
+  stage: string
+  usedSkills: string[]
+  confidence: number
+  summary: string
+  contentMarkdown: string
+  constraints: string[]
+  writebackItems: OutlineWritebackItem[]
+  risks: string[]
+  questions: string[]
+}
+
+export interface OutlineFinalResult {
+  outlineType: string
+  targetFolder: string
+  fileName: string
+  status: string
+  contentMarkdown: string
+  qualityCheck: {
+    valid: boolean
+    errors: string[]
+    warnings: string[]
+  }
+  writebackItems: OutlineWritebackItem[]
+  sourceAgents: string[]
+}
+
+export type OutlineProtocolParseResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: string }
+
+function extractJsonPayload(text: string): string {
+  const trimmed = text.trim()
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+  return (fenced?.[1] ?? trimmed).trim()
+}
+
+function parseJsonObject(text: string): OutlineProtocolParseResult<Record<string, unknown>> {
+  try {
+    const parsed = JSON.parse(extractJsonPayload(text))
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false, error: "结构化输出必须是 JSON 对象。" }
+    }
+    return { ok: true, value: parsed as Record<string, unknown> }
+  } catch (err) {
+    return { ok: false, error: `结构化输出 JSON 解析失败：${err instanceof Error ? err.message : String(err)}` }
+  }
+}
+
+function missingFields(data: Record<string, unknown>, fields: string[]): string[] {
+  return fields.filter((field) => data[field] === undefined || data[field] === null || data[field] === "")
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
+}
+
+function asWritebackItems(value: unknown): OutlineWritebackItem[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    .map((item) => ({
+      type: String(item.type ?? ""),
+      name: String(item.name ?? ""),
+      content: String(item.content ?? ""),
+      targetFolder: String(item.target_folder ?? item.targetFolder ?? ""),
+    }))
+}
+
+export function parseOutlineSubAgentResult(text: string): OutlineProtocolParseResult<OutlineSubAgentResult> {
+  const parsed = parseJsonObject(text)
+  if (!parsed.ok) return parsed
+
+  const required = [
+    "agent_id",
+    "agent_name",
+    "stage",
+    "used_skills",
+    "confidence",
+    "summary",
+    "content_markdown",
+    "constraints",
+    "writeback_items",
+    "risks",
+    "questions",
+  ]
+  const missing = missingFields(parsed.value, required)
+  if (missing.length > 0) {
+    return { ok: false, error: `子 Agent 输出缺少必要字段：${missing.join("、")}` }
+  }
+
+  return {
+    ok: true,
+    value: {
+      agentId: String(parsed.value.agent_id),
+      agentName: String(parsed.value.agent_name),
+      stage: String(parsed.value.stage),
+      usedSkills: asStringArray(parsed.value.used_skills),
+      confidence: Number(parsed.value.confidence),
+      summary: String(parsed.value.summary),
+      contentMarkdown: String(parsed.value.content_markdown),
+      constraints: asStringArray(parsed.value.constraints),
+      writebackItems: asWritebackItems(parsed.value.writeback_items),
+      risks: asStringArray(parsed.value.risks),
+      questions: asStringArray(parsed.value.questions),
+    },
+  }
+}
+
+export function parseOutlineFinalResult(text: string): OutlineProtocolParseResult<OutlineFinalResult> {
+  const parsed = parseJsonObject(text)
+  if (!parsed.ok) return parsed
+
+  const required = [
+    "outline_type",
+    "target_folder",
+    "file_name",
+    "status",
+    "content_markdown",
+    "quality_check",
+    "writeback_items",
+    "source_agents",
+  ]
+  const missing = missingFields(parsed.value, required)
+  if (missing.length > 0) {
+    return { ok: false, error: `最终大纲输出缺少必要字段：${missing.join("、")}` }
+  }
+
+  const quality = parsed.value.quality_check as Record<string, unknown>
+  return {
+    ok: true,
+    value: {
+      outlineType: String(parsed.value.outline_type),
+      targetFolder: String(parsed.value.target_folder),
+      fileName: String(parsed.value.file_name),
+      status: String(parsed.value.status),
+      contentMarkdown: String(parsed.value.content_markdown),
+      qualityCheck: {
+        valid: Boolean(quality?.valid),
+        errors: asStringArray(quality?.errors),
+        warnings: asStringArray(quality?.warnings),
+      },
+      writebackItems: asWritebackItems(parsed.value.writeback_items),
+      sourceAgents: asStringArray(parsed.value.source_agents),
+    },
+  }
+}

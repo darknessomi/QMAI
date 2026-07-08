@@ -1,7 +1,7 @@
 import { create } from "zustand"
 
-export type OutlineTaskStatus = "generating" | "generated" | "ingesting" | "done" | "error"
-export type OutlineTaskKind = "outline" | "refine" | "ingest"
+export type OutlineTaskStatus = "ingesting" | "done" | "error"
+export type OutlineTaskKind = "ingest"
 
 export interface OutlineGenerationTask {
   id: string
@@ -76,7 +76,7 @@ export const useOutlineGenerationStore = create<OutlineGenerationState>((set) =>
         {
           id,
           ...input,
-          kind: input.kind ?? "outline",
+          kind: input.kind ?? "ingest",
           genre: input.genre ?? "",
           scale: input.scale ?? "",
           premise: input.premise ?? "",
@@ -92,7 +92,7 @@ export const useOutlineGenerationStore = create<OutlineGenerationState>((set) =>
           writeMode: input.writeMode ?? null,
           targetPath: input.targetPath ?? null,
           outlinePath: input.outlinePath ?? null,
-          status: input.status ?? "generating",
+          status: input.status ?? "ingesting",
           message: input.message ?? "",
           error: input.error ?? null,
           createdAt: now,

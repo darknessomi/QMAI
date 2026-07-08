@@ -30,6 +30,7 @@ interface OutlineChatState {
   streamingContent: string
   isStreaming: boolean
   loaded: boolean
+  pendingReferenceTokens: ReferenceToken[]
 
   createConversation: () => string
   setActiveConversation: (id: string | null) => void
@@ -40,6 +41,8 @@ interface OutlineChatState {
   setConversationModel: (id: string, modelId: string) => void
   setStreamingContent: (content: string) => void
   setIsStreaming: (value: boolean) => void
+  enqueueReferenceTokens: (tokens: ReferenceToken[]) => void
+  consumePendingReferenceTokens: () => ReferenceToken[]
   loadFromDisk: () => Promise<void>
   saveToDisk: () => Promise<void>
 }
@@ -56,6 +59,7 @@ export const useOutlineChatStore = create<OutlineChatState>((set, get) => ({
   streamingContent: "",
   isStreaming: false,
   loaded: false,
+  pendingReferenceTokens: [],
 
   createConversation: () => {
     const id = crypto.randomUUID()
@@ -137,6 +141,17 @@ export const useOutlineChatStore = create<OutlineChatState>((set, get) => ({
 
   setStreamingContent: (content) => set({ streamingContent: content }),
   setIsStreaming: (value) => set({ isStreaming: value }),
+  enqueueReferenceTokens: (tokens) => {
+    if (tokens.length === 0) return
+    set((state) => ({
+      pendingReferenceTokens: [...state.pendingReferenceTokens, ...tokens],
+    }))
+  },
+  consumePendingReferenceTokens: () => {
+    const tokens = get().pendingReferenceTokens
+    set({ pendingReferenceTokens: [] })
+    return tokens
+  },
 
   loadFromDisk: async () => {
     const path = getStoragePath()

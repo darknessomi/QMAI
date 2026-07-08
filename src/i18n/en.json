@@ -1,4 +1,4 @@
-﻿{
+{
   "app": {
     "title": "青幕AI写作",
     "subtitle": "AI writing system for long-form novels",
@@ -1189,6 +1189,10 @@
       "settings": "模型与写作设置",
       "switchProject": "Switch Project"
     },
+    "draftReview": {
+      "dialogTab": "Writing Chat",
+      "reviewTab": "Review Results"
+    },
     "labels": {
       "knowledgeBase": "章节库",
       "file": "大纲",
@@ -1652,6 +1656,7 @@
       "writingStyle": "## Writing Style",
       "searchResults": "## Related Search Results",
       "graphSearchResults": "## Graph Related Nodes",
+      "sectionBriefing": "## Section Briefing",
       "foreshadowing": {
         "repeatedUnresolved": "These foreshadowing threads have reappeared recently without clear progression. Decide whether to continue planting, advancing, or resolving them in this chapter: {{names}}"
       },

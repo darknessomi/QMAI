@@ -169,6 +169,7 @@ describe("reference providers", () => {
     const skills = createSkillProvider(() => [{
       id: "s1",
       name: "长标题".repeat(12),
+      subtype: "writing",
       kind: ["structure", "planning"],
       stages: ["planning", "review"],
       modes: ["standard", "strict"],

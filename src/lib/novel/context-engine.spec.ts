@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { contextPackToPrompt, trimContextPack, type ContextPack } from "./context-engine"
+import { annotateChapterOutlineStatus, contextPackToPrompt, trimContextPack, type ContextPack } from "./context-engine"
 
 const basePack: ContextPack = {
   task: "生成第2章正文",
@@ -36,6 +36,22 @@ describe("contextPackToPrompt", () => {
 
     expect(prompt).toContain("最近章节正文片段")
     expect(prompt).toContain("黑背心纹身大汉倒在雨里")
+  })
+})
+
+describe("annotateChapterOutlineStatus", () => {
+  it("已确认章纲不添加风险提示", () => {
+    const content = "## 基础信息\n- 当前状态：已确认\n"
+
+    expect(annotateChapterOutlineStatus(content)).toBe(content)
+  })
+
+  it("草稿章纲添加普通 AI 会话风险提示", () => {
+    const result = annotateChapterOutlineStatus("## 基础信息\n- 当前状态：草稿\n")
+
+    expect(result).toContain("章纲状态提示")
+    expect(result).toContain("当前状态为「草稿」")
+    expect(result).toContain("不得自行补写或改写章纲")
   })
 })
 

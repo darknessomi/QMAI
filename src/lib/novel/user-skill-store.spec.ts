@@ -25,6 +25,7 @@ import {
   updateWritingSkill,
   USER_SKILL_CONFIG_FILE,
 } from "./user-skill-store"
+import { SKILL_ROUTE_CATEGORY_IDS } from "./skill-route"
 
 describe("user-skill-store", () => {
   beforeEach(() => {
@@ -133,6 +134,17 @@ it("ensureBuiltinSkills adds missing built-in skills to empty config", () => {
   const result = ensureBuiltinSkills(config)
 
   expect(result.skills.length).toBeGreaterThanOrEqual(10)
+  expect(result.categories.map((category) => category.name)).toEqual([
+    "正文",
+    "大纲",
+    "设定",
+    "角色",
+    "世界观",
+    "势力",
+    "伏笔",
+    "地图",
+    "题材",
+  ])
   const builtinSkills = result.skills.filter((s) => s.source === "built-in")
   expect(builtinSkills.length).toBeGreaterThanOrEqual(10)
   const names = builtinSkills.map((s) => s.name)
@@ -149,6 +161,17 @@ it("ensureBuiltinSkills adds missing built-in skills to empty config", () => {
   expect(names).toContain("基础去AI味")
   expect(names).toContain("审稿返修")
   expect(names).toContain("返修后复审")
+  expect(names).toContain("设定一致性")
+  expect(names).toContain("势力结构")
+  expect(names).toContain("地图推进")
+  expect(result.skills.find((s) => s.name === "下一章计划")?.categoryId).toBe(SKILL_ROUTE_CATEGORY_IDS.outline)
+  expect(result.skills.find((s) => s.name === "正文输出协议")?.categoryId).toBe(SKILL_ROUTE_CATEGORY_IDS.writing)
+  expect(result.skills.find((s) => s.name === "人物动机")?.categoryId).toBe(SKILL_ROUTE_CATEGORY_IDS.character)
+  expect(result.skills.find((s) => s.name === "世界观植入")?.categoryId).toBe(SKILL_ROUTE_CATEGORY_IDS.worldbuilding)
+  expect(result.skills.find((s) => s.name === "伏笔管理")?.categoryId).toBe(SKILL_ROUTE_CATEGORY_IDS.foreshadowing)
+  expect(result.skills.find((s) => s.name === "设定一致性")?.categoryId).toBe(SKILL_ROUTE_CATEGORY_IDS.setting)
+  expect(result.skills.find((s) => s.name === "势力结构")?.categoryId).toBe(SKILL_ROUTE_CATEGORY_IDS.faction)
+  expect(result.skills.find((s) => s.name === "地图推进")?.categoryId).toBe(SKILL_ROUTE_CATEGORY_IDS.map)
 })
 
 it("keeps existing built-in IDs stable while adding new writing skills", () => {

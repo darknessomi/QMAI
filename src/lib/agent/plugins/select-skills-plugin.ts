@@ -2,6 +2,7 @@ import type { PrePlugin, PrePluginInput, PrePluginOutput } from "../pipeline"
 import { resolveAiWorkflowMode, type AiWorkflowMode, type LegacyAiWorkflowMode } from "../workflow-mode"
 import type { NovelTaskIntent } from "@/lib/novel/task-router"
 import type { SkillKind, SkillStage, UserSkill } from "@/lib/novel/skill-library"
+import { filterSkillsForSkillRoute, filterSkillsForSkillRoutes, inferSkillRoute, type SkillRoute } from "@/lib/novel/skill-route"
 
 const WRITING_INTENTS = new Set<NovelTaskIntent>([
   "write_chapter",
@@ -39,6 +40,15 @@ const STRICT_WRITING_SKILL_NAMES = [
 const FAST_WRITING_SKILL_NAMES = ["正文输出协议", "去AI味"]
 
 const EXCLUDED_FROM_FALLBACK = ["去AI味"]
+const OUTLINE_SUPPORT_ROUTES: SkillRoute[] = [
+  "character",
+  "setting",
+  "worldbuilding",
+  "faction",
+  "foreshadowing",
+  "map",
+  "topic",
+]
 
 export function createSelectSkillsPlugin(): PrePlugin {
   return {
@@ -77,11 +87,7 @@ export function selectSkillsForRoute(
   }
 
   if (intent === "generate_outline") {
-    return selectByShape(modeSkills, resolvedMode, {
-      kinds: ["planning", "structure", "output"],
-      stages: ["planning", "output"],
-      limit: resolvedMode === "strict" ? 8 : 5,
-    })
+    return selectOutlineSkills(modeSkills, resolvedMode)
   }
 
   if (REVIEW_INTENTS.has(intent)) {
@@ -103,12 +109,39 @@ export function selectSkillsForRoute(
   return []
 }
 
+function selectOutlineSkills(skills: UserSkill[], mode: Exclude<AiWorkflowMode, "fast">): UserSkill[] {
+  const limit = mode === "strict" ? 8 : 5
+  const options = {
+      kinds: ["planning", "structure", "output"],
+      stages: ["planning", "output"],
+      limit,
+    } satisfies { kinds: SkillKind[]; stages: SkillStage[]; limit: number }
+  const outlineSkills = selectByShape(filterSkillsForSkillRoute(skills, "outline"), mode, options)
+  const supportSkills = selectByShape(filterSkillsForSkillRoutes(skills, OUTLINE_SUPPORT_ROUTES), mode, options)
+  const selected: UserSkill[] = []
+  for (const skill of [...outlineSkills, ...supportSkills]) {
+    if (selected.length >= limit) break
+    if (!selected.some((item) => item.id === skill.id)) {
+      selected.push(skill)
+    }
+  }
+  if (selected.length > 0) {
+    return selected
+  }
+  return selectByShape(skills, mode, options)
+}
+
 function selectWritingSkills(skills: UserSkill[], mode: Exclude<AiWorkflowMode, "fast">): UserSkill[] {
+  const writingSkills = skills.filter((skill) => {
+    const route = inferSkillRoute(skill)
+    return route === "writing" || route === null
+  })
+  const scopedSkills = writingSkills.length > 0 ? writingSkills : skills
   if (mode === "standard") {
-    return selectPreferredNames(skills, FAST_WRITING_SKILL_NAMES, 3, false)
+    return selectPreferredNames(scopedSkills, FAST_WRITING_SKILL_NAMES, 3, false)
   }
   if (mode === "strict") {
-    return selectPreferredNames(skills, STRICT_WRITING_SKILL_NAMES, 12)
+    return selectPreferredNames(scopedSkills, STRICT_WRITING_SKILL_NAMES, 12)
   }
   return []
 }

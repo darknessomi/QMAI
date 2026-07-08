@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { createSelectSkillsPlugin, buildSelectedSkillsPrompt } from "./select-skills-plugin"
+import { createSelectSkillsPlugin, buildSelectedSkillsPrompt, selectSkillsForRoute } from "./select-skills-plugin"
 import { normalizeUserSkill, type UserSkill } from "@/lib/novel/skill-library"
+import { SKILL_ROUTE_CATEGORY_IDS } from "@/lib/novel/skill-route"
 
 function skill(partial: Partial<UserSkill>): UserSkill {
   return normalizeUserSkill({
@@ -97,7 +98,7 @@ describe("SelectSkillsPlugin", () => {
     expect(result.selectedSkills).toEqual([])
   })
 
-  it("selects strict review and structure skills for key chapter writing", async () => {
+  it("selects writing route skills for key chapter writing", async () => {
     const plugin = createSelectSkillsPlugin()
 
     const result = await plugin.run({
@@ -111,17 +112,7 @@ describe("SelectSkillsPlugin", () => {
     })
 
     expect(result.selectedSkills?.map((item) => item.name)).toEqual([
-      "章节承接",
-      "下一章计划",
-      "人物动机",
-      "冲突升级",
-      "剧情自检",
       "正文输出协议",
-      "主线检查",
-      "伏笔管理",
-      "节奏检查",
-      "结尾钩子",
-      "世界观资料",
     ])
   })
 
@@ -149,5 +140,67 @@ describe("SelectSkillsPlugin", () => {
     expect(prompt).toContain("三翻四抖")
     expect(prompt).toContain("三次转折，四次震惊。")
     expect(prompt).toContain("不要在最终回复中解释 Skill")
+  })
+
+  it("routes outline generation to outline folders and excludes writing-only skills", () => {
+    const selected = selectSkillsForRoute([
+      skill({
+        id: "outline-plan",
+        name: "章纲结构",
+        kind: ["planning"],
+        stages: ["planning"],
+        modes: ["standard", "strict"],
+        categoryId: SKILL_ROUTE_CATEGORY_IDS.outline,
+      }),
+      skill({
+        id: "character",
+        name: "人物动机",
+        kind: ["structure"],
+        stages: ["planning"],
+        modes: ["standard", "strict"],
+        categoryId: SKILL_ROUTE_CATEGORY_IDS.character,
+      }),
+      skill({
+        id: "writing",
+        name: "正文输出协议",
+        kind: ["output"],
+        stages: ["output"],
+        modes: ["standard", "strict"],
+        categoryId: SKILL_ROUTE_CATEGORY_IDS.writing,
+      }),
+    ], "generate_outline", "standard")
+
+    expect(selected.map((item) => item.name)).toEqual(["章纲结构", "人物动机"])
+  })
+
+  it("routes chapter writing to writing folders when categorized skills exist", () => {
+    const selected = selectSkillsForRoute([
+      skill({
+        id: "outline-plan",
+        name: "下一章计划",
+        kind: ["planning"],
+        stages: ["planning"],
+        modes: ["standard", "strict"],
+        categoryId: SKILL_ROUTE_CATEGORY_IDS.outline,
+      }),
+      skill({
+        id: "writing-output",
+        name: "正文输出协议",
+        kind: ["output"],
+        stages: ["output"],
+        modes: ["standard", "strict"],
+        categoryId: SKILL_ROUTE_CATEGORY_IDS.writing,
+      }),
+      skill({
+        id: "writing-style",
+        name: "场景描写",
+        kind: ["style"],
+        stages: ["drafting"],
+        modes: ["standard", "strict"],
+        categoryId: SKILL_ROUTE_CATEGORY_IDS.writing,
+      }),
+    ], "write_chapter", "strict")
+
+    expect(selected.map((item) => item.name)).toEqual(["正文输出协议", "场景描写"])
   })
 })

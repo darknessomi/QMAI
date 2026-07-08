@@ -27,8 +27,8 @@ import {
 import { normalizePath } from "@/lib/path-utils";
 import { refreshProjectState } from "@/lib/project-refresh";
 import {
+  readFile,
   writeFile,
-  listDirectory,
   createDirectory,
   fileExists,
 } from "@/commands/fs";
@@ -40,9 +40,39 @@ import {
   type ToolCallRecord,
 } from "@/components/chat/agent-tool-call-message";
 import { ChatDockControls } from "@/components/chat/chat-dock-controls";
+import {
+  OutlineSaveConfirmDialog,
+  type OutlineSaveConfirmPayload,
+} from "@/components/sources/outline-save-confirm-dialog";
+import { OutlineWizardDialog } from "@/components/sources/outline-wizard-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { OUTLINE_SECTION_GENERATION_CONFIGS } from "@/lib/novel/outline-generation";
+import { OUTLINE_SECTION_GENERATION_CONFIGS } from "@/lib/novel/outline-section-configs";
+import {
+  buildOutlineWizardPrompt,
+  getOutlineWizardSkillNames,
+  type OutlineWizardRequest,
+} from "@/lib/novel/outline-wizard";
+import {
+  planOutlineSubAgents,
+  runOutlineMultiAgentWorkflow,
+} from "@/lib/novel/outline-multi-agent-orchestrator";
 import { prepareOutlineSaveDraft } from "@/lib/outline-save";
+import {
+  type CharacterSaveDraft,
+  extractCharacterSaveDrafts,
+} from "@/lib/novel/character-save-extractor";
+import { classifyOutlineSaveTarget } from "@/lib/novel/outline-save-classifier";
+import {
+  formatChapterOutlineQualityReport,
+  summarizeChapterOutlineQuality,
+} from "@/lib/novel/outline-quality-check";
+import {
+  characterDraftsToSaveRequests,
+  type OutlineSaveRequest,
+  parseOutlineSaveRequests,
+  saveOutlineSaveRequests,
+  splitConfirmRequiredSaveRequests,
+} from "@/lib/novel/outline-save-request";
 import {
   resolveModelConfig,
   resolveNovelModel,
@@ -81,8 +111,9 @@ import {
 import {
   loadUserSkillConfig,
   resolveEnabledWritingSkills,
-  type UserSkill,
 } from "@/lib/novel/user-skill-store";
+import type { UserSkill } from "@/lib/novel/skill-library";
+import { filterSkillsForSkillRoutes } from "@/lib/novel/skill-route";
 import { readSoulDoc } from "@/lib/novel/soul-doc";
 import {
   buildWebResearchContext,
@@ -96,6 +127,46 @@ import {
 import { createWriteOutlineNodeTool } from "@/lib/agent/tools/write-outline-node";
 
 const OUTLINE_CHAT_DISABLED_TOOLS = ["write_chapter", "write_memory"];
+const OUTLINE_CHAT_WIZARD_DISABLED_TOOLS = [
+  ...OUTLINE_CHAT_DISABLED_TOOLS,
+  "write_outline_node",
+];
+const OUTLINE_CHAT_SKILL_ROUTES = [
+  "outline",
+  "setting",
+  "character",
+  "worldbuilding",
+  "faction",
+  "foreshadowing",
+  "map",
+  "topic",
+] as const;
+
+function prioritizeOutlineSkills(
+  skills: UserSkill[],
+  preferredSkillNames: string[] = [],
+): UserSkill[] {
+  if (preferredSkillNames.length === 0) return skills;
+  const preferredIndex = new Map(
+    preferredSkillNames.map((name, index) => [name, index]),
+  );
+  return skills
+    .map((skill) =>
+      preferredIndex.has(skill.name)
+        ? { ...skill, priority: 1, tags: [...skill.tags, "本次优先"] }
+        : skill,
+    )
+    .sort((left, right) => {
+      const leftIndex = preferredIndex.get(left.name);
+      const rightIndex = preferredIndex.get(right.name);
+      if (leftIndex !== undefined && rightIndex !== undefined) {
+        return leftIndex - rightIndex;
+      }
+      if (leftIndex !== undefined) return -1;
+      if (rightIndex !== undefined) return 1;
+      return 0;
+    });
+}
 
 function referenceCategoryLabel(category: ReferenceToken["category"]): string {
   switch (category) {
@@ -156,16 +227,26 @@ function buildOutlineAgentSystemPrompt(options: {
     "你必须通过可用工具读取项目大纲、章节、记忆、推演结果和历史对话后，再进行分析、回答、生成或修改建议。",
     "如果用户提供 @ 引用，必须优先按路径、标题或会话ID调用对应读取工具获取正文内容。",
     "不要假设引用内容已经注入上下文；不要跳过工具直接空泛回答。",
-    "回答必须基于已读取内容进行分析，说明关键判断依据；需要保存大纲时只能使用 write_outline_node。",
+    "回答必须基于已读取内容进行分析，说明关键判断依据；需要保存大纲时只能使用 write_outline_node；生成可保存内容时必须同时输出 outlineSaveRequest 或 outlineSaveRequests JSON 块供系统自动归档。",
     "## AI大纲固定分析流程",
     "1. 先调用 list_outlines、list_chapters、list_memories、list_deductions 确认可用资料范围。",
     "2. 再调用 read_outline、read_chapter、read_memory、read_deduction 读取用户 @ 引用和相关项目内容。",
     "3. 分析冲突、缺口、伏笔、角色动机和章节承接，明确哪些判断来自已读取资料。",
     "4. 最后再生成大纲建议；没有完成读取和分析前，不要直接给出结论。",
     "## AI大纲生成工作流",
+    "固定向导提交的小说生成需求必须先进入“需求分析/生成方案”阶段：先判断缺失信息，信息足够时只输出生成方案、文件清单、保存位置和生成顺序，并询问用户是否确认开始生成；用户确认前不得生成完整文件，不得调用保存工具。",
+    "需求分析必须执行充分性闸门：缺少篇幅、频道、题材、故事灵感、核心卖点、作品规模、主要人物方向、世界观/背景方向或预期章节结构时，只追问最关键缺口。",
+    "长篇小说必须先卷后章：先形成核心设定、总纲、卷节拍表、卷时间线和卷纲，再生成章纲；不得从灵感直接跳到全书章纲。",
+    "章纲采用滚动章纲方式：优先生成前 10 章或用户指定范围，后续依据已确认章纲继续补齐，避免一次性生成整本导致承接断裂。",
+    "生成章纲后必须列出新增设定写回清单，包含新增角色、势力、世界观规则、伏笔、地图地点和状态变化；用户确认前不得写入设定文件。",
     "当用户要求生成、完善或续写任何大纲分项时，必须按 PRD 3.1 主流程执行：提取请求关键词，识别用户意图，按意图读取资料，提取对小说创作有用的关键内容，结合用户要用的 skill + soul.md 约束生成内容，再做结果强约束收敛。",
     "关键内容提取必须服务于小说创作：只保留能帮助用户继续写小说的信息，例如章节目标、冲突推进、人物动机、伏笔状态、设定限制、时间线承接和结尾钩子。",
-    "最终回复只输出大纲标题和大纲正文；禁止输出工具调用报告、分析过程、完成报告、下一步行动、无法直接保存的大段说明。",
+    "生成章纲时必须使用章纲标准结构：基础信息、上层依据、本章目标、核心事件、场景顺序、结构节点、章首钩子、爽点设计、章尾钩子、执行约束、人物状态、伏笔与追踪、待写回设定、写作约束、AI写作提示。核心事件不少于6条，场景顺序为2-4个场景。",
+    "结构节点必须包含 CBN、CPNs、CEN；CEN 必须能承接下一章 CBN。执行约束必须包含必须覆盖节点和本章禁区。基础信息必须包含时间锚点、章内时间跨度和与上章时间差。",
+    "## AI 大纲输出协议",
+    "当本轮生成了可保存的大纲、卷纲、章纲、人物、设定、伏笔、组织或质量检查内容时，最终回复末尾必须附加一个 json 代码块，顶层字段为 outlineSaveRequest 或 outlineSaveRequests。",
+    "保存请求必须包含 targetFolder、fileName、fileType、writeMode、referencedSkills、sourceIntent、content。fileName 必须是 .md 文件，targetFolder 必须位于大纲文件树文件夹内。",
+    "最终回复只输出大纲标题和大纲正文；如果内容需要自动保存，末尾附加 AI 大纲输出协议 JSON 保存块。禁止输出工具调用报告、分析过程、完成报告、下一步行动、无法直接保存的大段说明。",
     "工具调用过程只应展示在工具调用 UI 中，不要混入最终正文。资料不足以生成完整正文时，先提出最少必要澄清问题，不要用流程说明冒充生成结果。",
     "所有面向用户的回复必须使用中文。",
     options.projectName ? `当前项目：${options.projectName}` : "",
@@ -226,6 +307,34 @@ function buildOutlineSectionGenerationPrompt(
     getOutlineSectionOutputRules(title),
     "",
     "如果资料不足以完整生成，请只问一个最关键的澄清问题；如果资料足够，直接输出完整正文。",
+  ].join("\n");
+}
+
+function buildOutlineWizardMultiAgentPrompt(request: OutlineWizardRequest): string {
+  const basePrompt = buildOutlineWizardPrompt(request);
+  const subAgentPlan = planOutlineSubAgents({
+    preferredSkillNames: getOutlineWizardSkillNames(request),
+    taskPrompt: basePrompt,
+    maxConcurrency: 3,
+  });
+
+  return [
+    basePrompt,
+    "",
+    "## 多 Agent 并行生成",
+    "如果当前模型和环境支持多 Agent，请通过 runOutlineMultiAgentWorkflow 按以下子 Agent 计划并行生成；如果多 Agent 不支持、并发失败或合并失败，必须自动回退为单 Agent，不得中断用户流程。",
+    "所有子 Agent 默认禁止写入文件，最终结果必须先进入中间编辑区预览，用户确认后再保存。",
+    "",
+    "## 子 Agent 计划",
+    ...subAgentPlan.map((agent, index) => [
+      `${index + 1}. ${agent.name}`,
+      `   - 类型：${agent.kind}`,
+      `   - Skill：${agent.skillNames.join("、") || "无"}`,
+      "   - 写入权限：禁用",
+    ].join("\n")),
+    "",
+    "## 回退规则",
+    "多 Agent 并行生成不可用时，自动回退为单 Agent，继续使用同一份向导参数、引用内容和 Skill 路由。",
   ].join("\n");
 }
 
@@ -316,18 +425,44 @@ function formatOutlineConversationDate(timestamp: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-async function getUniqueOutlinePath(
+export async function getUniqueOutlinePath(
   outlinesDir: string,
-  title: string,
+  fileName: string,
 ): Promise<string> {
-  const fileName = `${title}.md`;
-  const firstPath = `${outlinesDir}/${fileName}`;
+  const normalizedFileName = fileName.toLowerCase().endsWith(".md")
+    ? fileName
+    : `${fileName}.md`;
+  const firstPath = `${outlinesDir}/${normalizedFileName}`;
   if (!(await fileExists(firstPath))) return firstPath;
+  const extensionIndex = normalizedFileName.lastIndexOf(".");
+  const stem = extensionIndex > 0 ? normalizedFileName.slice(0, extensionIndex) : normalizedFileName;
+  const extension = extensionIndex > 0 ? normalizedFileName.slice(extensionIndex) : "";
   for (let i = 2; i <= 99; i++) {
-    const candidate = `${outlinesDir}/${title}-${i}.md`;
+    const candidate = `${outlinesDir}/${stem}-${i}${extension}`;
     if (!(await fileExists(candidate))) return candidate;
   }
-  return `${outlinesDir}/${title}-${Date.now()}.md`;
+  return `${outlinesDir}/${stem}-${Date.now()}${extension}`;
+}
+
+function buildFallbackCharacterDraftsFromRequests(
+  requests: OutlineSaveRequest[],
+): CharacterSaveDraft[] {
+  return requests.map((request, index) => {
+    const stem = request.fileName.replace(/\.md$/i, "");
+    const parts = stem.split("-").filter(Boolean);
+    const looksLikeRoleFile = parts[0] === "角色" && parts.length >= 3;
+    const roleType = looksLikeRoleFile ? parts[1] : "角色";
+    const characterName = looksLikeRoleFile ? parts.slice(2).join("-") : stem;
+    return {
+      id: `fallback:${index}:${request.fileName}`,
+      characterName,
+      roleType,
+      fileName: request.fileName,
+      content: request.content,
+      selected: false,
+      confidence: "low",
+    };
+  });
 }
 
 function separateThinking(text: string): {
@@ -636,6 +771,12 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   );
   const setStreamingContent = useOutlineChatStore((s) => s.setStreamingContent);
   const setIsStreaming = useOutlineChatStore((s) => s.setIsStreaming);
+  const pendingReferenceTokens = useOutlineChatStore(
+    (s) => s.pendingReferenceTokens,
+  );
+  const consumePendingReferenceTokens = useOutlineChatStore(
+    (s) => s.consumePendingReferenceTokens,
+  );
   const loadFromDisk = useOutlineChatStore((s) => s.loadFromDisk);
 
   const activeConv = conversations.find((c) => c.id === activeConversationId);
@@ -674,6 +815,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
     ReferenceToken[]
   >([]);
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
+  const [outlineWizardOpen, setOutlineWizardOpen] = useState(false);
   const [localModelId, setLocalModelId] = useState(activeConv?.modelId ?? "");
   const insertReferenceTokensRef = useRef<InsertReferenceTokens>(null);
   const [hoveredConversationId, setHoveredConversationId] = useState<string | null>(null);
@@ -683,6 +825,16 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   const [historyDropdownStyle, setHistoryDropdownStyle] = useState<CSSProperties | null>(null);
   const [deAiSkillConfig, setDeAiSkillConfig] = useState<DeAiSkillConfig | null>(null);
   const [writingSkills, setWritingSkills] = useState<UserSkill[]>([]);
+  const outlineWritingSkills = useMemo(() => {
+    const routed = filterSkillsForSkillRoutes(writingSkills, [...OUTLINE_CHAT_SKILL_ROUTES]);
+    return routed.length > 0 ? routed : writingSkills;
+  }, [writingSkills]);
+
+  useEffect(() => {
+    if (pendingReferenceTokens.length === 0) return;
+    const tokens = consumePendingReferenceTokens();
+    insertReferenceTokensRef.current?.(tokens);
+  }, [consumePendingReferenceTokens, pendingReferenceTokens]);
 
   const referenceProviders = useMemo(
     () => [
@@ -698,11 +850,11 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
               subtype: "deai" as const,
             }))
           : []
-        const writingSkillList = writingSkills.map((skill) => ({
+        const writingSkillList = outlineWritingSkills.map((skill) => ({
           id: skill.id,
           name: skill.name,
           subtype: "writing" as const,
-          kind: skill.kinds,
+          kind: skill.kind,
           stages: skill.stages,
           modes: skill.modes,
         }))
@@ -721,7 +873,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         })),
       ),
     ],
-    [chatConversations, conversations, deAiSkillConfig, writingSkills],
+    [chatConversations, conversations, deAiSkillConfig, outlineWritingSkills],
   );
 
   // 加载持久化的历史记录
@@ -813,11 +965,18 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   }, [activeConversationId]);
 
   const [saveStatus, setSaveStatus] = useState("");
+  const [saveConfirmState, setSaveConfirmState] = useState<{
+    title: string;
+    mode: "normal" | "character";
+    requests: OutlineSaveRequest[];
+    characterDrafts: CharacterSaveDraft[];
+  } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
   const lastScrollTopRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const streamingConversationIdRef = useRef<string | null>(null);
 
   // Auto-scroll
   useEffect(() => {
@@ -846,8 +1005,134 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
     return () => container.removeEventListener("scroll", handleScroll);
   }, []);
 
+  const executeConfirmedOutlineSave = useCallback(
+    async (payload: OutlineSaveConfirmPayload) => {
+      if (!project) return;
+      const projectPath = normalizePath(project.path);
+      const requests = payload.characterDrafts.length > 0
+        ? characterDraftsToSaveRequests(payload.characterDrafts, "保存人物小传")
+        : payload.requests;
+      if (requests.length === 0) {
+        setSaveStatus("没有选择需要保存的内容。");
+        return;
+      }
+
+      setSaveStatus("正在保存大纲文件...");
+      try {
+        const saveResult = await saveOutlineSaveRequests({
+          outlineRoot: `${projectPath}/wiki/outlines`,
+          requests,
+          createDirectory,
+          fileExists,
+          readFile,
+          writeFile,
+        });
+        if (saveResult.saved.length > 0) {
+          await refreshProjectState(projectPath);
+          const names = saveResult.saved.map((item) => item.fileName).join("、");
+          setSaveStatus(`已保存 ${saveResult.saved.length} 个文件：${names}`);
+          setSaveConfirmState(null);
+          return;
+        }
+        if (saveResult.skipped.length > 0) {
+          setSaveStatus(saveResult.skipped.slice(0, 2).join("；"));
+          return;
+        }
+        if (saveResult.errors.length > 0) {
+          setSaveStatus(`保存失败：${saveResult.errors.slice(0, 2).join("；")}`);
+        }
+      } catch (error) {
+        setSaveStatus(`保存失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    [project],
+  );
+
+  const handleAutoSaveOutlineRequests = useCallback(
+    async (assistantContent: string) => {
+      if (!project) return;
+      const parsed = parseOutlineSaveRequests(assistantContent);
+      if (parsed.requests.length === 0) {
+        if (parsed.errors.length > 0) {
+          setSaveStatus(`自动保存失败：${parsed.errors.slice(0, 2).join("；")}`);
+        }
+        return;
+      }
+
+      setSaveStatus("正在自动保存大纲...");
+      try {
+        const projectPath = normalizePath(project.path);
+        const split = splitConfirmRequiredSaveRequests(parsed.requests);
+        if (split.confirmRequired.length > 0) {
+          const characterContent = split.confirmRequired
+            .map((request) => request.content)
+            .join("\n\n");
+          const extracted = extractCharacterSaveDrafts(characterContent);
+          if (extracted.drafts.length > 0) {
+            setSaveConfirmState({
+              title: "请确认要保存的人物角色",
+              mode: "character",
+              requests: [],
+              characterDrafts: extracted.drafts,
+            });
+            setSaveStatus("检测到人物小传，请确认要保存的人物角色。");
+          } else {
+            setSaveConfirmState({
+              title: "请确认要保存的人物角色",
+              mode: "character",
+              requests: [],
+              characterDrafts: buildFallbackCharacterDraftsFromRequests(
+                split.confirmRequired,
+              ),
+            });
+            setSaveStatus(
+              `无法自动拆分角色，请在保存前检查文件名和内容。${extracted.errors.join("；")}`,
+            );
+          }
+        }
+        if (split.autoSaveable.length === 0) return;
+
+        const saveResult = await saveOutlineSaveRequests({
+          outlineRoot: `${projectPath}/wiki/outlines`,
+          requests: split.autoSaveable,
+          createDirectory,
+          fileExists,
+          readFile,
+          writeFile,
+        });
+        if (saveResult.saved.length > 0) {
+          await refreshProjectState(projectPath);
+          const names = saveResult.saved.map((item) => item.fileName).join("、");
+          const skipped = saveResult.skipped.length > 0
+            ? `；${saveResult.skipped.slice(0, 2).join("；")}`
+            : "";
+          setSaveStatus(`已自动保存 ${saveResult.saved.length} 个大纲文件：${names}${skipped}`);
+          return;
+        }
+        if (saveResult.skipped.length > 0) {
+          setSaveStatus(saveResult.skipped.slice(0, 2).join("；"));
+          return;
+        }
+        if (saveResult.errors.length > 0 || parsed.errors.length > 0) {
+          setSaveStatus(`自动保存失败：${[...saveResult.errors, ...parsed.errors].slice(0, 2).join("；")}`);
+        }
+      } catch (error) {
+        setSaveStatus(`自动保存失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    [project],
+  );
+
   const handleSend = useCallback(
-    async (inputText: string, tokens: ReferenceToken[] = []) => {
+    async (
+      inputText: string,
+      tokens: ReferenceToken[] = [],
+      options: {
+        disableWriteTools?: boolean;
+        preferredSkillNames?: string[];
+        enableMultiAgent?: boolean;
+      } = {},
+    ) => {
       const prompt = inputText.trim();
       if (!prompt || !project || isStreaming) return;
       setInputValue("");
@@ -927,6 +1212,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       });
       setIsStreaming(true);
       setStreamingContent("");
+      streamingConversationIdRef.current = convId;
       userScrolledUpRef.current = false;
 
       try {
@@ -954,49 +1240,11 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           (): DeAiSkillConfig | null => null,
         );
         const soulDoc = await readSoulDoc(project.path).catch(() => "");
-        const registry = new ToolRegistry();
         const systemPrompt = buildOutlineAgentSystemPrompt({
           projectName: project.name,
           webResearchContext: webResearchMarkdown,
           soulDoc,
         });
-        const agentConfig = buildAgentConfig(
-          effectiveModelId,
-          systemPrompt,
-          registry,
-          {
-            wikiPath: `${normalizePath(project.path)}/wiki`,
-            getSkillConfig: () => skillConfig,
-            getChatConversations: () => {
-              const state = useChatStore.getState();
-              return state.conversations.map((conversation) => ({
-                id: conversation.id,
-                title: conversation.title,
-                messages: state.messages
-                  .filter(
-                    (message) => message.conversationId === conversation.id,
-                  )
-                  .map((message) => ({
-                    role: message.role,
-                    content: message.content,
-                  })),
-              }));
-            },
-            getOutlineConversations: () =>
-              useOutlineChatStore
-                .getState()
-                .conversations.map((conversation) => ({
-                  id: conversation.id,
-                  title: conversation.title,
-                  messages: conversation.messages.map((message) => ({
-                    role: message.role,
-                    content: message.content,
-                  })),
-                })),
-            llmConfig: effectiveLlmConfig,
-            disabledTools: OUTLINE_CHAT_DISABLED_TOOLS,
-          },
-        );
         const agentMessages: AgentMessage[] = [
           { role: "system", content: systemPrompt },
           ...historyBeforeSend,
@@ -1005,59 +1253,227 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             content: buildOutlineAgentUserContent(prompt, tokens),
           },
         ];
-        let agentError: Error | null = null;
+        const allToolCalls: AgentRunRecord["toolCalls"] = [];
+        const buildConfigForSkillNames = (
+          skillNames: string[] | undefined,
+          disableWriteTools: boolean | undefined,
+        ) => {
+          const registry = new ToolRegistry();
+          const effectiveOutlineWritingSkills = prioritizeOutlineSkills(
+            outlineWritingSkills,
+            skillNames,
+          );
+          const agentConfig = buildAgentConfig(
+            effectiveModelId,
+            systemPrompt,
+            registry,
+            {
+              wikiPath: `${normalizePath(project.path)}/wiki`,
+              getSkillConfig: () => skillConfig,
+              getUserSkills: () => effectiveOutlineWritingSkills,
+              getChatConversations: () => {
+                const state = useChatStore.getState();
+                return state.conversations.map((conversation) => ({
+                  id: conversation.id,
+                  title: conversation.title,
+                  messages: state.messages
+                    .filter(
+                      (message) => message.conversationId === conversation.id,
+                    )
+                    .map((message) => ({
+                      role: message.role,
+                      content: message.content,
+                    })),
+                }));
+              },
+              getOutlineConversations: () =>
+                useOutlineChatStore
+                  .getState()
+                  .conversations.map((conversation) => ({
+                    id: conversation.id,
+                    title: conversation.title,
+                    messages: conversation.messages.map((message) => ({
+                      role: message.role,
+                      content: message.content,
+                    })),
+                  })),
+              llmConfig: effectiveLlmConfig,
+              disabledTools: disableWriteTools
+                ? OUTLINE_CHAT_WIZARD_DISABLED_TOOLS
+                : OUTLINE_CHAT_DISABLED_TOOLS,
+            },
+          );
+          return { agentConfig, registry };
+        };
 
-        const record = await new AgentRunner().run(
-          agentConfig,
-          registry,
-          agentMessages,
-          {
-            onText: (chunk) => {
-              result += chunk;
-              setStreamingContent(result);
+        const runOutlineAgentOnce = async (
+          messages: AgentMessage[],
+          optionsForRun: {
+            skillNames?: string[];
+            disableWriteTools?: boolean;
+            streamToUser?: boolean;
+            statusText?: string;
+          } = {},
+        ): Promise<{ text: string; record: AgentRunRecord }> => {
+          const { agentConfig, registry } = buildConfigForSkillNames(
+            optionsForRun.skillNames,
+            optionsForRun.disableWriteTools,
+          );
+          let runText = "";
+          let agentError: Error | null = null;
+          if (optionsForRun.statusText) {
+            setStreamingContent(optionsForRun.statusText);
+          }
+          const record = await new AgentRunner().run(
+            agentConfig,
+            registry,
+            messages,
+            {
+              onText: (chunk) => {
+                runText += chunk;
+                if (optionsForRun.streamToUser) {
+                  result += chunk;
+                  setStreamingContent(result);
+                }
+              },
+              onToolCall: () => {},
+              onToolResult: () => {},
+              onToolError: () => {},
+              onToolEvent: (event) => {
+                updateOutlineAssistantMessage(convId, assistantId, (message) => ({
+                  ...message,
+                  agentToolCalls: applyAgentToolEvent(
+                    message.agentToolCalls,
+                    event,
+                  ),
+                }));
+              },
+              onDone: () => {},
+              onError: (error) => {
+                agentError = error;
+              },
             },
-            onToolCall: () => {},
-            onToolResult: () => {},
-            onToolError: () => {},
-            onToolEvent: (event) => {
-              updateOutlineAssistantMessage(convId, assistantId, (message) => ({
-                ...message,
-                agentToolCalls: applyAgentToolEvent(
-                  message.agentToolCalls,
-                  event,
-                ),
-              }));
+            controller.signal,
+          );
+          allToolCalls.push(...record.toolCalls);
+          if (agentError) throw agentError;
+          return { text: runText || record.finalText, record };
+        };
+
+        const runSingleAgentFallback = async () => {
+          result = "";
+          const singleRun = await runOutlineAgentOnce(agentMessages, {
+            skillNames: options.preferredSkillNames,
+            disableWriteTools: options.disableWriteTools,
+            streamToUser: true,
+          });
+          return singleRun.text || "AI大纲未返回内容。";
+        };
+
+        let finalText = "";
+        if (options.enableMultiAgent) {
+          const subAgentPlan = planOutlineSubAgents({
+            preferredSkillNames: options.preferredSkillNames ?? [],
+            taskPrompt: prompt,
+            maxConcurrency: 3,
+          });
+          const multiAgentResult = await runOutlineMultiAgentWorkflow({
+            plan: subAgentPlan,
+            maxConcurrency: 3,
+            failureFallbackThreshold: 0.5,
+            runSubAgent: async (subAgentPlan) => {
+              const subAgentMessages: AgentMessage[] = [
+                {
+                  role: "system",
+                  content: [
+                    systemPrompt,
+                    "",
+                    "## 子 Agent 运行规则",
+                    `当前身份：${subAgentPlan.name}`,
+                    "你只能处理本 Agent 负责的维度，禁止写入文件。",
+                    "必须输出符合 AI 大纲子 Agent JSON 协议的 JSON，不要输出额外说明。",
+                  ].join("\n"),
+                },
+                ...historyBeforeSend,
+                {
+                  role: "user",
+                  content: buildOutlineAgentUserContent(
+                    subAgentPlan.taskPrompt,
+                    tokens,
+                  ),
+                },
+              ];
+              const subRun = await runOutlineAgentOnce(subAgentMessages, {
+                skillNames: subAgentPlan.skillNames,
+                disableWriteTools: true,
+                statusText: `多 Agent 并行生成中...\n正在运行：${subAgentPlan.name}`,
+              });
+              return subRun.text;
             },
-            onDone: () => {
-              updateOutlineAssistantMessage(convId, assistantId, (message) => ({
-                ...message,
-                agentToolCalls: settleRunningAgentToolCalls(
-                  message.agentToolCalls,
-                ),
-                isAgentRunning: false,
-              }));
+            runSingleAgentFallback: async () => {
+              setStreamingContent(
+                "当前环境不支持多 Agent 并行生成，已自动回退为单 Agent 大纲生成。",
+              );
+              return runSingleAgentFallback();
             },
-            onError: (error) => {
-              agentError = error;
+            mergeResults: async (subAgentResults) => {
+              result = "";
+              const mergeMessages: AgentMessage[] = [
+                {
+                  role: "system",
+                  content: [
+                    systemPrompt,
+                    "",
+                    "## 合并 Agent 运行规则",
+                    "你负责合并多个子 Agent 的结构化结果，形成最终可预览的大纲草稿。",
+                    "输出必须是用户可直接阅读和保存的大纲正文，不要输出内部调度报告。",
+                  ].join("\n"),
+                },
+                ...historyBeforeSend,
+                {
+                  role: "user",
+                  content: [
+                    "请合并以下 AI 大纲子 Agent 结果，解决冲突并输出最终大纲草稿。",
+                    "",
+                    "## 原始用户需求",
+                    buildOutlineAgentUserContent(prompt, tokens),
+                    "",
+                    "## 子 Agent 结构化结果",
+                    JSON.stringify(subAgentResults, null, 2),
+                  ].join("\n"),
+                },
+              ];
+              const mergeRun = await runOutlineAgentOnce(mergeMessages, {
+                skillNames: options.preferredSkillNames,
+                disableWriteTools: true,
+                streamToUser: true,
+                statusText: "多 Agent 已完成，正在合并大纲结果...",
+              });
+              return mergeRun.text || "AI大纲未返回内容。";
             },
-          },
-          controller.signal,
-        );
-        if (agentError) throw agentError;
+          });
+          finalText = multiAgentResult.finalText;
+        } else {
+          finalText = await runSingleAgentFallback();
+        }
 
         const finalSources = Array.from(
           new Set([
             ...outlineSources,
-            ...outlineToolCallsToSources(record.toolCalls),
+            ...outlineToolCallsToSources(allToolCalls),
           ]),
         );
+        const finalContent = finalText || result || "AI大纲未返回内容。";
         updateOutlineAssistantMessage(convId, assistantId, (message) => ({
           ...message,
-          content: result || record.finalText || "AI大纲未返回内容。",
+          content: finalContent,
           sources: finalSources,
-          agentToolCalls: settleRunningAgentToolCalls(record.toolCalls.length ? record.toolCalls : message.agentToolCalls),
+          agentToolCalls: settleRunningAgentToolCalls(
+            allToolCalls.length ? allToolCalls : message.agentToolCalls,
+          ),
           isAgentRunning: false,
         }));
+        await handleAutoSaveOutlineRequests(finalContent);
         const firstUser = useOutlineChatStore
           .getState()
           .conversations.find((conversation) => conversation.id === convId)
@@ -1111,6 +1527,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       } finally {
         setIsStreaming(false);
         abortRef.current = null;
+        if (streamingConversationIdRef.current === convId) {
+          streamingConversationIdRef.current = null;
+        }
       }
     },
     [
@@ -1125,6 +1544,8 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       addMessage,
       replaceLastAssistant,
       removeLastMessage,
+      handleAutoSaveOutlineRequests,
+      outlineWritingSkills,
       setIsStreaming,
       setStreamingContent,
     ],
@@ -1137,16 +1558,30 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
     [handleSend],
   );
 
+  const handleSubmitOutlineWizard = useCallback(
+    (request: OutlineWizardRequest) => {
+      void handleSend(buildOutlineWizardMultiAgentPrompt(request), [], {
+        disableWriteTools: true,
+        preferredSkillNames: getOutlineWizardSkillNames(request),
+        enableMultiAgent: true,
+      });
+    },
+    [handleSend],
+  );
+
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
     // Force stop streaming state immediately in case abort doesn't trigger catch
     const partial = useOutlineChatStore.getState().streamingContent;
-    if (partial && activeConversationId) {
-      replaceLastAssistant(activeConversationId, partial);
+    const streamingConversationId =
+      streamingConversationIdRef.current ?? activeConversationId;
+    if (partial && streamingConversationId) {
+      replaceLastAssistant(streamingConversationId, partial);
     }
     setStreamingContent("");
     setIsStreaming(false);
     abortRef.current = null;
+    streamingConversationIdRef.current = null;
   }, [
     activeConversationId,
     replaceLastAssistant,
@@ -1208,6 +1643,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
 
       setIsStreaming(true);
       setStreamingContent("");
+      streamingConversationIdRef.current = activeConversationId;
       userScrolledUpRef.current = false;
 
       try {
@@ -1258,6 +1694,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           {
             wikiPath: `${normalizePath(project.path)}/wiki`,
             getSkillConfig: () => skillConfig,
+            getUserSkills: () => outlineWritingSkills,
             getChatConversations: () => {
               const state = useChatStore.getState();
               return state.conversations.map((conversation) => ({
@@ -1340,17 +1777,19 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         if (agentError) throw agentError;
 
         const sources = outlineToolCallsToSources(record.toolCalls);
+        const finalContent = result || record.finalText || "AI大纲未返回内容。";
         updateOutlineAssistantMessage(
           activeConversationId,
           assistantId,
           (message) => ({
             ...message,
-            content: result || record.finalText || "AI大纲未返回内容。",
+            content: finalContent,
             sources,
             agentToolCalls: settleRunningAgentToolCalls(record.toolCalls.length ? record.toolCalls : message.agentToolCalls),
             isAgentRunning: false,
           }),
         );
+        await handleAutoSaveOutlineRequests(finalContent);
         setStreamingContent("");
         void useOutlineChatStore.getState().saveToDisk();
       } catch (err) {
@@ -1367,6 +1806,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       } finally {
         setIsStreaming(false);
         abortRef.current = null;
+        if (streamingConversationIdRef.current === activeConversationId) {
+          streamingConversationIdRef.current = null;
+        }
       }
     },
     [
@@ -1379,6 +1821,8 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       activeConversationId,
       addMessage,
       replaceLastAssistant,
+      handleAutoSaveOutlineRequests,
+      outlineWritingSkills,
       setIsStreaming,
       setStreamingContent,
     ],
@@ -1397,28 +1841,54 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   const handleSaveAsOutline = useCallback(
     async (content: string) => {
       if (!project) return;
-      setSaveStatus("保存中...");
+      setSaveStatus("");
       try {
-        const pp = normalizePath(project.path);
-        const outlinesDir = `${pp}/wiki/outlines`;
-        await createDirectory(outlinesDir);
-        const existingFiles = await listDirectory(outlinesDir).catch(() => []);
-        const existingTitles = existingFiles
-          .filter((file) => file.name.endsWith(".md"))
-          .map((file) => file.name.replace(/\.md$/i, "").trim())
-          .filter(Boolean);
-        const draft = prepareOutlineSaveDraft(content, existingTitles);
-        const outlinePath = await getUniqueOutlinePath(
-          outlinesDir,
-          draft.title,
-        );
-        const fileName =
-          outlinePath.split("/").pop()?.replace(/\.md$/, "") ?? draft.title;
+        const draft = prepareOutlineSaveDraft(content, []);
+        const classification = classifyOutlineSaveTarget({
+          title: draft.title,
+          content: draft.content,
+        });
+        if (classification.fileType === "character") {
+          const extracted = extractCharacterSaveDrafts(draft.content);
+          if (extracted.drafts.length === 0) {
+            setSaveStatus(extracted.errors.join("；"));
+            return;
+          }
+          setSaveConfirmState({
+            title: "请确认要保存的人物角色",
+            mode: "character",
+            requests: [],
+            characterDrafts: extracted.drafts,
+          });
+          return;
+        }
+
         const body = draft.content.replace(/^#\s+.+(?:\r?\n){1,2}/, "").trim();
-        const mdContent = `---\ntype: outline\ntitle: "${fileName}"\n---\n\n# ${fileName}\n\n${body}\n`;
-        await writeFile(outlinePath, mdContent);
-        await refreshProjectState(pp);
-        setSaveStatus(`已保存：${fileName}`);
+        const mdContent = `# ${classification.fileName.replace(/\.md$/i, "")}\n\n${body}`;
+        if (classification.fileType === "chapter-outline") {
+          const quality = summarizeChapterOutlineQuality(mdContent);
+          if (!quality.valid) {
+            setSaveStatus(formatChapterOutlineQualityReport(quality, {
+              maxIssues: 4,
+              includeWarnings: true,
+            }));
+            return;
+          }
+        }
+        setSaveConfirmState({
+          title: "保存大纲文件",
+          mode: "normal",
+          requests: [{
+            targetFolder: classification.targetFolder,
+            fileName: classification.fileName,
+            fileType: classification.fileType,
+            writeMode: "create",
+            referencedSkills: [],
+            sourceIntent: "手动保存 AI 大纲结果",
+            content: mdContent,
+          }],
+          characterDrafts: [],
+        });
       } catch (err) {
         setSaveStatus(
           `保存失败：${err instanceof Error ? err.message : String(err)}`,
@@ -1659,7 +2129,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
                 />
               ) : (
                 <>
-                  <span>{msg.content}</span>
+                  <span className="block whitespace-pre-wrap break-words">
+                    {msg.content}
+                  </span>
                   {msg.attachedReferences &&
                   msg.attachedReferences.length > 0 ? (
                     <div className="mt-1 flex flex-wrap gap-1">
@@ -1702,6 +2174,19 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
               />
             </div>
           </TooltipProvider>
+        </div>
+        <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-2 py-1.5">
+          <div className="min-w-0 text-xs text-muted-foreground">
+            通过固定选项生成大纲需求，再交给 AI 分析和追问
+          </div>
+          <button
+            type="button"
+            className="shrink-0 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isStreaming}
+            onClick={() => setOutlineWizardOpen(true)}
+          >
+            选择生成你想要的小说
+          </button>
         </div>
         <ReferenceInput
           value={inputValue}
@@ -1749,6 +2234,22 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           }}
           onClose={() => setReferencePickerOpen(false)}
         />
+        <OutlineWizardDialog
+          open={outlineWizardOpen}
+          onOpenChange={setOutlineWizardOpen}
+          onSubmit={handleSubmitOutlineWizard}
+        />
+        {saveConfirmState ? (
+          <OutlineSaveConfirmDialog
+            open
+            title={saveConfirmState.title}
+            mode={saveConfirmState.mode}
+            requests={saveConfirmState.requests}
+            characterDrafts={saveConfirmState.characterDrafts}
+            onClose={() => setSaveConfirmState(null)}
+            onConfirm={executeConfirmedOutlineSave}
+          />
+        ) : null}
       </div>
     </div>
   );

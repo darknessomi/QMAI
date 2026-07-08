@@ -1,9 +1,8 @@
 import { useCallback, useMemo, useState } from "react"
-import { Loader2, MessageSquare, Sparkles } from "lucide-react"
+import { Loader2, MessageSquare } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
-import { OutlineGeneratorDialog, type OutlineGeneratorMode } from "@/components/sources/outline-generator-dialog"
-import { runBulkOutlineIngest } from "@/lib/novel/outline-generation"
+import { runBulkOutlineIngest } from "@/lib/novel/outline-ingest"
 import { cn } from "@/lib/utils"
 import { useOutlineGenerationStore } from "@/stores/outline-generation-store"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -24,8 +23,6 @@ export function OutlineActionToolbar({
   const setActiveView = useWikiStore((s) => s.setActiveView)
   const outlineTasks = useOutlineGenerationStore((s) => s.tasks)
   const setOutlineChatOpen = useOutlineGenerationStore((s) => s.setPanelOpen)
-  const [outlineDialogOpen, setOutlineDialogOpen] = useState(false)
-  const [outlineDialogMode, setOutlineDialogMode] = useState<OutlineGeneratorMode>("outline")
   const [bulkIngestRunning, setBulkIngestRunning] = useState(false)
 
   const bulkIngesting = useMemo(() => (
@@ -35,11 +32,6 @@ export function OutlineActionToolbar({
       task.status === "ingesting"
     ))
   ), [outlineTasks, project])
-
-  function openOutlineDialog(mode: OutlineGeneratorMode) {
-    setOutlineDialogMode(mode)
-    setOutlineDialogOpen(true)
-  }
 
   const handleOpenOutlineChat = useCallback(() => {
     if (onToggleOutlineChat) {
@@ -70,36 +62,26 @@ export function OutlineActionToolbar({
   }, [bulkIngestRunning, bulkIngesting, onBulkIngestResult, project, t])
 
   return (
-    <>
-      <div className={cn("flex flex-wrap gap-1", className)}>
-        <Button size="sm" onClick={() => openOutlineDialog("outline")}>
-          <Sparkles className="mr-1 h-4 w-4" />
-          {t("novel.outlineGenerator.title")}
-        </Button>
-        <Button size="sm" variant="outline" onClick={handleOpenOutlineChat}>
-          <MessageSquare className="mr-1 h-4 w-4" />
-          AI大纲
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => openOutlineDialog("refine")}>
-          {t("novel.outlineGenerator.refineTitle")}
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => void handleBulkIngest()} disabled={bulkIngestRunning || bulkIngesting}>
-          {bulkIngestRunning || bulkIngesting ? (
-            <>
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-              {t("novel.outlineGenerator.bulkIngesting")}
-            </>
-          ) : (
-            t("novel.outlineGenerator.bulkIngest")
-          )}
-        </Button>
-      </div>
-
-      <OutlineGeneratorDialog
-        open={outlineDialogOpen}
-        onOpenChange={setOutlineDialogOpen}
-        mode={outlineDialogMode}
-      />
-    </>
+    <div className={cn("flex flex-wrap gap-1", className)}>
+      <Button size="sm" variant="outline" onClick={handleOpenOutlineChat}>
+        <MessageSquare className="mr-1 h-4 w-4" />
+        AI大纲
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => void handleBulkIngest()}
+        disabled={bulkIngestRunning || bulkIngesting}
+      >
+        {bulkIngestRunning || bulkIngesting ? (
+          <>
+            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            {t("novel.outlineGenerator.bulkIngesting")}
+          </>
+        ) : (
+          t("novel.outlineGenerator.bulkIngest")
+        )}
+      </Button>
+    </div>
   )
 }

@@ -9,6 +9,11 @@ import {
   type UserSkill,
 } from "@/lib/novel/skill-library"
 import { DEFAULT_BUILTIN_WRITING_SKILLS, getBuiltinSkillIds } from "./skill-seed"
+import {
+  DEFAULT_SKILL_ROUTE_CATEGORIES,
+  inferSkillRoute,
+  SKILL_ROUTE_CATEGORY_IDS,
+} from "./skill-route"
 
 export const USER_SKILL_CONFIG_FILE = "writing-skills.json"
 
@@ -59,6 +64,27 @@ function normalizeWritingSkill(value: unknown): UserSkill | null {
     source: raw.source === "built-in" ? "built-in" : raw.source === "linked" ? "linked" : "uploaded",
     content: typeof raw.content === "string" ? raw.content : "",
   })
+}
+
+function mergeDefaultSkillCategories(categories: SkillCategory[]): SkillCategory[] {
+  const byId = new Map(categories.map((category) => [category.id, category]))
+  const merged = [...categories]
+  for (const defaultCategory of DEFAULT_SKILL_ROUTE_CATEGORIES) {
+    if (!byId.has(defaultCategory.id)) {
+      merged.push(defaultCategory)
+    }
+  }
+  return merged
+}
+
+function assignDefaultCategory(skill: UserSkill, categoryIds: Set<string>): UserSkill {
+  if (skill.categoryId && categoryIds.has(skill.categoryId)) return skill
+  const route = inferSkillRoute(skill)
+  if (!route) return skill
+  return {
+    ...skill,
+    categoryId: SKILL_ROUTE_CATEGORY_IDS[route],
+  }
 }
 
 export function normalizeUserSkillConfig(value: unknown): UserSkillConfig {
@@ -479,14 +505,21 @@ export async function saveUserSkillConfig(projectPath: string, config: UserSkill
  * Ensure built-in writing skills are always present.
  */
 export function ensureBuiltinSkills(config: UserSkillConfig): UserSkillConfig {
+  const categories = mergeDefaultSkillCategories(config.categories)
+  const categoryIds = new Set(categories.map((category) => category.id))
   const existingBuiltinIds = new Set(
     config.skills.filter((s) => s.source === "built-in").map((s) => s.id)
   );
-  const missing = DEFAULT_BUILTIN_WRITING_SKILLS.filter((s) => !existingBuiltinIds.has(s.id));
-  if (missing.length === 0) return config;
+  const missing = DEFAULT_BUILTIN_WRITING_SKILLS
+    .filter((s) => !existingBuiltinIds.has(s.id))
+    .map((skill) => assignDefaultCategory(skill, categoryIds));
+  const skills = [...missing, ...config.skills].map((skill) =>
+    skill.source === "built-in" ? assignDefaultCategory(skill, categoryIds) : skill
+  );
   return normalizeUserSkillConfig({
     ...config,
-    skills: [...missing, ...config.skills],
+    skills,
+    categories,
   });
 }
 

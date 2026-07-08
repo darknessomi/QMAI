@@ -30,6 +30,7 @@ import { ReviewCenterSidebarPanel } from "./review-center-sidebar-panel";
 import { BookAnalysisSidebarPanel } from "./book-analysis-sidebar-panel";
 import { FrameworkList } from "@/components/novel/story-simulation/framework-list";
 import { UnifiedSkillLibrarySidebarPanel } from "@/components/skill-library/unified-skill-library-view";
+import { OutlineFileTreePanel } from "@/components/sources/outline-file-tree-panel";
 
 import { useWikiStore } from "@/stores/wiki-store";
 import { useChatStore } from "@/stores/chat-store";
@@ -924,6 +925,7 @@ export function SidebarPanel() {
   }, [activeView, selectedFile]);
 
   const isChapter = mode === "knowledge";
+  const useOutlineSidebarTree = activeView === "sources" && novelMode;
 
   useEffect(() => {
     if (!pendingCreate?.kind) return;
@@ -1125,7 +1127,7 @@ export function SidebarPanel() {
         currentTitle: getFileName(outlinePath),
       });
       const { createOutlineIngestTask, runOutlineIngestTask } =
-        await import("@/lib/novel/outline-generation");
+        await import("@/lib/novel/outline-ingest");
       const outlineTaskId = createOutlineIngestTask(projectPath, outlinePath);
       await runOutlineIngestTask(outlineTaskId);
       completed += 1;
@@ -1806,16 +1808,20 @@ export function SidebarPanel() {
       )}
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <KnowledgeTree
-          filterType={isChapter ? "chapter" : "outline"}
-          refreshKey={refreshKey}
-          pendingPages={pendingPages.filter(
-            (page) => page.type === (isChapter ? "chapter" : "outline"),
-          )}
-          onRemovePendingPage={handleRemovePendingPage}
-          onRequestCreate={beginCreate}
-          onSendToChat={isChapter ? handleSendChapterToChat : undefined}
-        />
+        {useOutlineSidebarTree ? (
+          <OutlineFileTreePanel showHeader={false} />
+        ) : (
+          <KnowledgeTree
+            filterType={isChapter ? "chapter" : "outline"}
+            refreshKey={refreshKey}
+            pendingPages={pendingPages.filter(
+              (page) => page.type === (isChapter ? "chapter" : "outline"),
+            )}
+            onRemovePendingPage={handleRemovePendingPage}
+            onRequestCreate={beginCreate}
+            onSendToChat={isChapter ? handleSendChapterToChat : undefined}
+          />
+        )}
       </div>
       <div className="border-t px-3 py-2">
         <button

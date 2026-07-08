@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { FilePlus, Loader2, Sparkles } from "lucide-react";
+import { FilePlus, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -12,15 +12,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useWikiStore } from "@/stores/wiki-store";
-import { streamChat } from "@/lib/llm-client";
-import { resolveDefaultModel } from "@/lib/novel/model-resolver";
-import { hasUsableLlm } from "@/lib/has-usable-llm";
-import { writeFile, listDirectory, createDirectory } from "@/commands/fs";
-import { PROMPTS } from "@/lib/novel/prompt-templates";
+import { writeFile, readFile, listDirectory, createDirectory } from "@/commands/fs";
 import { normalizePath } from "@/lib/path-utils";
 import type { OutlineType } from "@/lib/novel/chapter-meta";
 import { loadPlotFrameworkLibrary } from "@/lib/novel/plot-framework-library";
-import { formatPlotFrameworkForOutlinePrompt, type PlotFramework } from "@/lib/novel/plot-framework";
+import type { PlotFramework } from "@/lib/novel/plot-framework";
+import { runVolumeOutlineQualityCheck, type QualityCheckItem } from "@/lib/novel/outline-quality-check";
 
 const OUTLINE_TYPES: { value: OutlineType; labelKey: string }[] = [
   { value: "story-outline", labelKey: "novel.outline.type.story" },
@@ -42,21 +39,21 @@ export function OutlineCreatorDialog({
 }: OutlineCreatorDialogProps) {
   const { t } = useTranslation();
   const project = useWikiStore((s) => s.project);
-  const baseLlmConfig = useWikiStore((s) => s.llmConfig);
-  const providerConfigs = useWikiStore((s) => s.providerConfigs);
   const setFileTree = useWikiStore((s) => s.setFileTree);
 
   const [outlineType, setOutlineType] = useState<OutlineType>("story-outline");
   const [title, setTitle] = useState("");
   const [volumeNumber, setVolumeNumber] = useState("");
   const [chapterNumber, setChapterNumber] = useState("");
-  const [premise, setPremise] = useState("");
-  const [useAi, setUseAi] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [frameworks, setFrameworks] = useState<PlotFramework[]>([]);
   const [selectedFrameworkId, setSelectedFrameworkId] = useState<string>("");
+  const [qualityCheckResults, setQualityCheckResults] = useState<QualityCheckItem[] | null>(null);
+  const [qualityCheckLoading, setQualityCheckLoading] = useState(false);
+  const [showQualityCheck, setShowQualityCheck] = useState(false);
+  const [createdFilePath, setCreatedFilePath] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !project) return;
@@ -78,11 +75,13 @@ export function OutlineCreatorDialog({
     setTitle("");
     setVolumeNumber("");
     setChapterNumber("");
-    setPremise("");
-    setUseAi(false);
     setSelectedFrameworkId("");
     setError(null);
     setDone(false);
+    setQualityCheckResults(null);
+    setQualityCheckLoading(false);
+    setShowQualityCheck(false);
+    setCreatedFilePath(null);
   }
 
   async function handleCreate() {
@@ -93,57 +92,10 @@ export function OutlineCreatorDialog({
       return;
     }
 
-    if (useAi && !premise.trim()) {
-      setError(t("novel.outline.premiseRequired"));
-      return;
-    }
-
     setGenerating(true);
     setError(null);
 
     try {
-      let content = "";
-
-      if (useAi) {
-        const llmConfig = resolveDefaultModel(baseLlmConfig);
-        if (!hasUsableLlm(llmConfig, providerConfigs)) {
-          setError("请先在设置中配置可用的 AI 模型");
-          setGenerating(false);
-          return;
-        }
-        const outlineTypeLabel = t(`novel.outline.type.${outlineType}`);
-        const effectiveFrameworkId = selectedFrameworkId || frameworkId;
-        const selectedFramework = effectiveFrameworkId
-          ? frameworks.find((fw) => fw.id === effectiveFrameworkId)
-          : undefined;
-        const outlineContext = selectedFramework
-          ? formatPlotFrameworkForOutlinePrompt(selectedFramework)
-          : "";
-        const prompt = PROMPTS.outlineGeneration(
-          outlineTypeLabel,
-          "",
-          premise,
-          outlineContext,
-        );
-
-        const errorRef = { current: null as Error | null };
-        await streamChat(llmConfig, [{ role: "user", content: prompt }], {
-          onToken: (token) => {
-            content += token;
-          },
-          onDone: () => {},
-          onError: (err) => {
-            errorRef.current = err;
-          },
-        });
-
-        if (errorRef.current) {
-          setError(errorRef.current.message);
-          setGenerating(false);
-          return;
-        }
-      }
-
       const pp = normalizePath(project.path);
       const outlinesDir = `${pp}/wiki/outlines`;
       await createDirectory(outlinesDir);
@@ -186,13 +138,14 @@ export function OutlineCreatorDialog({
 
       const filePath = `${outlinesDir}/${fileName}.md`;
       const fullContent =
-        frontmatterLines.join("\n") + (content || `# ${title.trim()}\n\n`);
+        frontmatterLines.join("\n") + `# ${title.trim()}\n\n`;
       await writeFile(filePath, fullContent);
 
       const tree = await listDirectory(pp);
       setFileTree(tree);
       useWikiStore.getState().bumpDataVersion();
 
+      setCreatedFilePath(filePath);
       setDone(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -204,6 +157,28 @@ export function OutlineCreatorDialog({
   function handleClose() {
     reset();
     onOpenChange(false);
+  }
+
+  async function handleQualityCheck() {
+    if (!createdFilePath || !project) return;
+    setQualityCheckLoading(true);
+    setQualityCheckResults(null);
+    setShowQualityCheck(true);
+    try {
+      const content = await readFile(createdFilePath);
+      const results = runVolumeOutlineQualityCheck(content);
+      setQualityCheckResults(results);
+    } catch (err) {
+      setQualityCheckResults([
+        {
+          category: "读取错误",
+          status: "error",
+          message: err instanceof Error ? err.message : "无法读取大纲文件",
+        },
+      ]);
+    } finally {
+      setQualityCheckLoading(false);
+    }
   }
 
   return (
@@ -221,7 +196,72 @@ export function OutlineCreatorDialog({
             <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300">
               {t("novel.outline.created")}
             </div>
-            <DialogFooter>
+
+            {showQualityCheck ? (
+              <div className="max-h-80 overflow-y-auto rounded-md border border-border bg-background p-3">
+                {qualityCheckLoading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <span className="text-sm text-muted-foreground">正在检查大纲质量...</span>
+                  </div>
+                ) : qualityCheckResults ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="mb-1 text-sm font-medium">检查结果</div>
+                    {qualityCheckResults.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className={`rounded-md border px-3 py-2 text-xs ${
+                          item.status === "pass"
+                            ? "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300"
+                            : item.status === "warn"
+                              ? "border-yellow-200 bg-yellow-50 text-yellow-700 dark:border-yellow-800 dark:bg-yellow-950 dark:text-yellow-300"
+                              : "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+                        }`}
+                      >
+                        <div className="flex items-start gap-1.5">
+                          <span className="mt-0.5 shrink-0">
+                            {item.status === "pass" ? "✓" : item.status === "warn" ? "⚠" : "✗"}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium">{item.category}</div>
+                            <div className="mt-0.5 opacity-80">{item.message}</div>
+                            {item.details && item.details.length > 0 && (
+                              <ul className="mt-1 list-inside list-disc space-y-0.5 pl-1 opacity-70">
+                                {item.details.map((d, di) => (
+                                  <li key={di}>{d}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="mt-1 text-center text-xs text-muted-foreground">
+                      共 {qualityCheckResults.length} 项检查，
+                      {qualityCheckResults.filter((r) => r.status === "error").length} 项错误，
+                      {qualityCheckResults.filter((r) => r.status === "warn").length} 项警告
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <DialogFooter className="gap-2 sm:gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleQualityCheck}
+                disabled={qualityCheckLoading}
+              >
+                {qualityCheckLoading ? (
+                  <>
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    检查中...
+                  </>
+                ) : (
+                  "检查大纲质量"
+                )}
+              </Button>
               <Button onClick={handleClose}>{t("project.cancel")}</Button>
             </DialogFooter>
           </div>
@@ -307,34 +347,6 @@ export function OutlineCreatorDialog({
                 </div>
               )}
 
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="use-ai"
-                  checked={useAi}
-                  onChange={(e) => setUseAi(e.target.checked)}
-                  disabled={generating}
-                  className="h-4 w-4 rounded border-input"
-                />
-                <Label htmlFor="use-ai" className="text-sm cursor-pointer">
-                  {t("novel.outline.useAi")}
-                </Label>
-              </div>
-
-              {useAi && (
-                <div className="flex flex-col gap-1.5">
-                  <Label>{t("novel.outline.premise")}</Label>
-                  <textarea
-                    value={premise}
-                    onChange={(e) => setPremise(e.target.value)}
-                    placeholder={t("novel.outline.premisePlaceholder")}
-                    disabled={generating}
-                    rows={3}
-                    className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-              )}
-
               {error && (
                 <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                   {error}
@@ -357,12 +369,7 @@ export function OutlineCreatorDialog({
                 {generating ? (
                   <>
                     <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                    {t("novel.outline.generating")}
-                  </>
-                ) : useAi ? (
-                  <>
-                    <Sparkles className="mr-1 h-4 w-4" />
-                    {t("novel.outline.createWithAi")}
+                    正在创建...
                   </>
                 ) : (
                   <>

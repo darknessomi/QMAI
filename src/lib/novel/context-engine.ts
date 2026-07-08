@@ -7,6 +7,7 @@ import { parseChapterMeta } from "./chapter-meta"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { listSnapshots, loadSnapshot, type ChapterSnapshot } from "./chapter-ingest"
 import { buildRevisionDirectives } from "./revision-feedback"
+import { extractChapterOutlineStatus } from "./outline-quality-check"
 import { loadCognitionState, cognitionToContextText } from "./character-cognition"
 import { getChapterVolumes } from "./volume"
 import { buildCharacterAuraContext } from "./character-aura"
@@ -18,6 +19,7 @@ import { getAllDataSources, getDataSourcesForCategories } from "./context-data-s
 import type { DataSourceCategory } from "./classification"
 
 const FIELD_PRIORITY: Record<string, number> = {
+  sectionBriefing: 0,
   task: 1,
   chapterGoal: 2,
   mustDo: 3,
@@ -66,6 +68,7 @@ export interface ContextPack {
   characterAuras: string
   cognitionStates: string
   foreshadowingStates: string
+  sectionBriefing?: string
   timeline: string
   relatedSettings: string
   canonRules: string
@@ -230,6 +233,7 @@ async function buildContextPackFromRawData(
     previousChapterEnding,
     characterStates,
     soulDoc: rawData.soulDoc,
+    sectionBriefing: rawData.sectionBriefing || "",
     characterAuras,
     cognitionStates: rawData.cognitionText,
     foreshadowingStates,
@@ -382,6 +386,7 @@ function emptyPack(task: string): ContextPack {
     characterAuras: "",
     cognitionStates: "",
     foreshadowingStates: "",
+    sectionBriefing: "",
     timeline: "",
     relatedSettings: "",
     canonRules: "",
@@ -501,7 +506,7 @@ async function readChapterOutlineDirect(pp: string, chapterNumber: number): Prom
 export async function readChapterOutlineContent(pp: string, chapterNumber?: number): Promise<string> {
   if (!chapterNumber) return ""
   const direct = await readChapterOutlineDirect(pp, chapterNumber)
-  if (direct.trim()) return direct
+  if (direct.trim()) return annotateChapterOutlineStatus(direct)
   const queries = [
     `第${chapterNumber}章细纲 outline`,
     `chapter ${chapterNumber} outline`,
@@ -511,11 +516,22 @@ export async function readChapterOutlineContent(pp: string, chapterNumber?: numb
     try {
       const results = await searchWiki(pp, query)
       if (results.length > 0) {
-        return (await readFile(results[0].path)).slice(0, 3000)
+        return annotateChapterOutlineStatus(await readFile(results[0].path)).slice(0, 3000)
       }
     } catch {}
   }
   return ""
+}
+
+export function annotateChapterOutlineStatus(content: string): string {
+  const status = extractChapterOutlineStatus(content)
+  if (status === "已确认") return content
+  const label = status === "未知" ? "未标明当前状态" : `当前状态为「${status}」`
+  return [
+    `【章纲状态提示】该章纲${label}，普通 AI 会话生成正文前应提醒用户确认是否继续使用；不得自行补写或改写章纲。`,
+    "",
+    content,
+  ].join("\n")
 }
 
 // 以下函数已被数据源模式使用，但通过动态导入，TypeScript 无法检测到
@@ -1036,6 +1052,7 @@ interface FieldConfig {
 }
 
 const FIELD_CONFIGS: FieldConfig[] = [
+  { titleKey: "novel.contextPack.sectionBriefing", fieldKey: "sectionBriefing" },
   { titleKey: "novel.contextPack.currentChapterGoal", fieldKey: "chapterGoal" },
   { titleKey: "novel.contextPack.mustDo.title", fieldKey: "mustDo" },
   { titleKey: "novel.contextPack.mustAvoid.title", fieldKey: "mustAvoid" },
@@ -1110,7 +1127,8 @@ export function trimContextPack(
       continue
     }
 
-    const content = pack[config.fieldKey as keyof ContextPack] as string | string[]
+    const rawContent = pack[config.fieldKey as keyof ContextPack] as string | string[] | undefined
+    const content = Array.isArray(rawContent) ? rawContent : rawContent ?? ""
     const hasContent = Array.isArray(content) ? content.length > 0 : Boolean(content)
     if (!hasContent) continue
 

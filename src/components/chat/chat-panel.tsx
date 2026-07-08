@@ -887,7 +887,7 @@ export function ChatPanel() {
           id: skill.id,
           name: skill.name,
           subtype: "writing" as const,
-          kind: skill.kinds,
+          kind: skill.kind,
           stages: skill.stages,
           modes: skill.modes,
         }))
@@ -1360,6 +1360,7 @@ export function ChatPanel() {
             characterAuras: "",
             cognitionStates: "",
             foreshadowingStates: "",
+            sectionBriefing: "",
             timeline: "",
             relatedSettings: "",
             canonRules: "",

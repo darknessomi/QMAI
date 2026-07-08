@@ -9,6 +9,9 @@ export type SourceOutlineImportTarget =
   | "locations"
   | "organizations"
   | "power-system"
+  | "golden-finger"
+  | "background-setting"
+  | "geography-setting"
   | "foreshadowing-plan"
 
 interface SourceOutlineImportConfig {
@@ -25,7 +28,10 @@ export const SOURCE_OUTLINE_IMPORT_TARGETS: SourceOutlineImportConfig[] = [
   { id: "character-briefs", title: "人物小传", folderName: "人物小传", category: "characters" },
   { id: "locations", title: "地点设定", folderName: "地点设定", category: "locations" },
   { id: "organizations", title: "势力设定", folderName: "势力设定", category: "organizations" },
-  { id: "power-system", title: "能力体系", folderName: "能力体系", category: "power-system" },
+  { id: "power-system", title: "力量体系", folderName: "力量体系", category: "power-system" },
+  { id: "golden-finger", title: "金手指设定", folderName: "金手指设定", category: "golden-finger" },
+  { id: "background-setting", title: "背景设定", folderName: "背景设定", category: "background-setting" },
+  { id: "geography-setting", title: "地理设定", folderName: "地理设定", category: "geography-setting" },
   { id: "foreshadowing-plan", title: "伏笔计划", folderName: "伏笔计划", category: "foreshadowing" },
 ]
 

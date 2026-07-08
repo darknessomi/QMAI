@@ -11,6 +11,7 @@ import { canonicalizeSnapshotCharacters, writeSnapshotToWiki, writePatchFieldsTo
 import { resolveNovelModel } from "./model-resolver"
 import { emptyCognitionState, mergeCognitionFromSnapshot, loadCognitionState, saveCognitionState } from "./character-cognition"
 import { createEmptyCharacterStateStore, loadCharacterStates, saveCharacterStates, type CharacterStateStore } from "./character-state"
+import { updateTrackingAfterChapter } from "./tracking-updater"
 import { createEmptyForeshadowingStore, loadForeshadowingTracker, saveForeshadowingTracker, type Foreshadowing, type ForeshadowingStore } from "./foreshadowing-tracker"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { shouldRebuildCommunitySummaries, generateCommunitySummaries } from "./community-summary"
@@ -546,6 +547,16 @@ export async function ingestChapter(
       })
     } catch (err) {
       console.warn("[Chapter Ingest] Retrieval index update failed:", err instanceof Error ? err.message : err)
+    }
+  }
+
+  // 章节写完后自动更新追踪文件
+  if (snapshot) {
+    try {
+      const chapterTitle = snapshot.chapterTitle || (typeof fm?.title === "string" ? fm.title : `第${chapterNumber}章`)
+      await updateTrackingAfterChapter(pp, chapterNumber, chapterTitle, body, snapshot.summary)
+    } catch (err) {
+      console.warn("[Chapter Ingest] 追踪文件更新失败:", err instanceof Error ? err.message : err)
     }
   }
 

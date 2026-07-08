@@ -13,6 +13,7 @@ import { loadCognitionState, cognitionToContextText } from "./character-cognitio
 import { getChapterVolumes } from "./volume"
 import { readSoulDoc } from "./soul-doc"
 import { buildWritingStyleContext } from "./writing-style-store"
+import { buildSectionBriefing } from "./section-briefing"
 import type { DataSource, ContextLoadContext } from "./context-data-source"
 import { loadFrameworks } from "./story-simulation/framework-store"
 import { loadBinding, buildBindingContext } from "./story-simulation/framework-binding"
@@ -35,6 +36,7 @@ const RECENT_CHAPTER_CONTENT_HEAD_CHARS = 2200
 const RECENT_CHAPTER_CONTENT_TAIL_CHARS = 3200
 
 const DATA_SOURCE_CATEGORY_MAP: Record<string, DataSourceCategory[]> = {
+  sectionBriefing: ["character_states", "foreshadowing", "settings"],
   outline: ["outline"],
   chapterOutline: ["outline"],
   volumeContext: ["outline", "settings"],
@@ -368,11 +370,23 @@ export const writingStyleDataSource: DataSource<string> = {
   name: "writingStyle",
   priority: 12,
   async load(context: ContextLoadContext): Promise<string> {
+    // 优先级1: 已启用的拆书作品文风预设
     try {
       const enabledStyle = await buildWritingStyleContext(context.projectPath)
       if (enabledStyle.trim()) return enabledStyle
     } catch {}
 
+    // 优先级2: 独立文风设定文件（wiki/写作风格.md 或 wiki/writing-style.md）
+    try {
+      const pp = context.projectPath
+      const stylePaths = [`${pp}/wiki/写作风格.md`, `${pp}/wiki/writing-style.md`]
+      for (const stylePath of stylePaths) {
+        const content = await readFile(stylePath)
+        if (content.trim()) return content.slice(0, 1000)
+      }
+    } catch {}
+
+    // 优先级3: 从 wiki 搜索风格相关页面
     try {
       const results = await searchWiki(context.projectPath, "style 风格 writing 写作")
       if (results.length > 0) {
@@ -467,6 +481,21 @@ export const characterAurasDataSource: DataSource<string> = {
   async load(_context: ContextLoadContext): Promise<string> {
     // 这个数据源需要依赖其他数据，将在主函数中单独处理
     return ""
+  },
+}
+
+/**
+ * 本节速记数据源
+ * 根据细纲筛选角色状态、伏笔和世界观约束，priority=0（最优先）
+ */
+export const sectionBriefingDataSource: DataSource<string> = {
+  name: "sectionBriefing",
+  priority: 0,
+  async load(context: ContextLoadContext): Promise<string> {
+    if (!context.chapterNumber) return ""
+    const chapterOutlineContent = await readChapterOutlineContent(context.projectPath, context.chapterNumber)
+    if (!chapterOutlineContent.trim()) return ""
+    return buildSectionBriefing(context.projectPath, context.chapterNumber, chapterOutlineContent)
   },
 }
 
@@ -592,6 +621,7 @@ function createRetrievalStoreForDataSource(projectPath: string): RetrievalStore 
  */
 export function getAllDataSources(): DataSource<any>[] {
   return [
+    sectionBriefingDataSource,
     outlineDataSource,
     chapterOutlineDataSource,
     volumeContextDataSource,

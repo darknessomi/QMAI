@@ -1595,11 +1595,7 @@ export function RawSourcesSection({ onCancelExtraction }: { onCancelExtraction?:
         <div className="ml-3 max-h-64 space-y-2 overflow-y-auto pr-1 text-xs text-muted-foreground">
           {hasAnyTask ? (
             projectTasks.slice(0, 20).map((task) => {
-              const kindLabel =
-              task.kind === "outline" ? "AI 大纲" :
-                task.kind === "outline_generation" ? "生成大纲" :
-                  task.kind === "outline_refinement" ? "细化生成" :
-                    "章节"
+              const kindLabel = task.kind === "outline" ? "AI 大纲" : "章节"
               const progressPercent = task.total > 0
                 ? Math.round((task.completed / task.total) * 100)
                 : 0

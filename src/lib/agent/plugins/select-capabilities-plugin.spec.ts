@@ -116,7 +116,7 @@ describe("SelectCapabilitiesPlugin", () => {
       taskRoute: { intent: "write_chapter", confidence: 0.9, extractedParams: {} },
     })
 
-    const toolNames = result.selectedCapabilities
+    const toolNames = (result.selectedCapabilities ?? [])
       .map((c) => c.toolName)
       .filter((n): n is string => Boolean(n))
 
@@ -161,7 +161,7 @@ describe("SelectCapabilitiesPlugin", () => {
       taskRoute: { intent: "write_chapter", confidence: 0.9, extractedParams: {} },
     })
 
-    const toolNames = result.selectedCapabilities
+    const toolNames = (result.selectedCapabilities ?? [])
       .map((c) => c.toolName)
       .filter((n): n is string => Boolean(n))
 
@@ -203,7 +203,7 @@ describe("SelectCapabilitiesPlugin", () => {
       taskRoute: { intent: "write_chapter", confidence: 0.9, extractedParams: {} },
     })
 
-    const toolNames = result.selectedCapabilities
+    const toolNames = (result.selectedCapabilities ?? [])
       .map((c) => c.toolName)
       .filter((n): n is string => Boolean(n))
 
@@ -242,7 +242,7 @@ describe("SelectCapabilitiesPlugin", () => {
       taskRoute: { intent: "write_chapter", confidence: 0.9, extractedParams: {} },
     })
 
-    const toolNames = result.selectedCapabilities
+    const toolNames = (result.selectedCapabilities ?? [])
       .map((c) => c.toolName)
       .filter((n): n is string => Boolean(n))
 

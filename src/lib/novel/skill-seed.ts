@@ -1,4 +1,6 @@
 import { normalizeUserSkill, type UserSkill } from "./skill-library"
+import { DEFAULT_SKILL_HUB_SKILLS } from "./skill-hub-seed"
+import { SKILL_ROUTE_CATEGORY_IDS } from "./skill-route"
 
 const chapterConnectionContent = `# 章节承接
 
@@ -1595,6 +1597,75 @@ const quotableLinesContent = `# 金句设计
 - **脱离剧情**：金句和当前的情节、人物没什么关系。→ 金句要为剧情和人物服务
 - **强行升华**：故事本身撑不起来，硬要在结尾加一句"升华"的话。→ 先把故事写好，金句自然会来`
 
+const settingConsistencyContent = `# 设定一致性
+
+## 核心目标
+
+在生成大纲、章纲或细纲时，确保新增内容不破坏已建立的规则、能力体系、金手指边界、社会规则和人物认知。
+
+## 检查维度
+
+1. **规则来源**：本章使用的设定来自哪里？是已有设定、临时新增，还是需要用户确认的新规则。
+2. **能力边界**：主角或关键角色能做什么、不能做什么、代价是什么，不能为了解决剧情临时开万能能力。
+3. **信息公开度**：哪些设定只有主角知道，哪些角色知道，读者知道多少，避免信息差混乱。
+4. **代价与限制**：每次使用能力、资源或制度便利，都要保留对应代价、冷却、风险或反制方式。
+5. **长期影响**：新设定是否会影响后续剧情规模、势力格局、人物目标和伏笔回收。
+
+## 输出要求
+
+- 生成章纲时，把设定约束写进"设定限制/规则约束"段落。
+- 如果需要新增设定，必须说明它服务哪一个冲突或伏笔。
+- 禁止只写"设定合理"这类空判断，必须落到具体规则和具体事件。`
+
+const factionStructureContent = `# 势力结构
+
+## 核心目标
+
+把组织、门派、家族、公司、官方机构或反派阵营设计成能持续制造目标、资源、压力和剧情选择的结构，而不是只作为背景名词。
+
+## 设计清单
+
+1. **势力目标**：这个势力当前最想得到什么？目标要能转化为行动。
+2. **资源来源**：它掌握金钱、武力、情报、人脉、地盘、技术或制度中的哪些资源。
+3. **内部矛盾**：上层、中层、执行者之间是否存在利益差、理念差或继承权冲突。
+4. **外部对手**：它与哪些势力竞争、合作或互相利用。
+5. **主角关系**：主角是加入、利用、反抗、被追杀，还是被迫承担该势力的因果。
+6. **剧情功能**：它在本卷/本章中负责提供资源、阻力、试炼、反转、伏笔或升级通道中的哪一项。
+
+## 章纲使用方式
+
+- 每次势力登场，都要写清它推动了哪个核心事件。
+- 建立势力类事件后，至少保留2章冷却，不要连续用同类事件刷屏。
+- 势力不能只有名字，必须有可见代表人物和可感知行动。`
+
+const mapProgressionContent = `# 地图推进
+
+## 核心目标
+
+设计新地图、换地图或阶段地图时，让环境、势力、规则、资源和冲突同步升级，避免地图只是换了地名。
+
+## 地图四势力框架
+
+开局首张地图优先包含四类功能势力，形成资源闭环：
+
+1. **学校/武馆/训练场**：学习技能、提升实力、建立评价体系。
+2. **商贩/药行/交易场**：卖出收获、获取资源、制造经济目标。
+3. **山贼/敌人/破坏者**：提供实战目标和成果展示对象。
+4. **官府/管理机构/上级组织**：提供更高层级的秩序、规则和上升通道。
+
+## 换地图三策略
+
+1. **新旧联动**：新地图最好与旧地图存在上级、仇怨、资源流向或历史因果。
+2. **带人走**：至少保留一个旧角色、旧关系或旧伏笔，避免读者情感断层。
+3. **提前铺垫**：换地图前先让新地图的传说、人物、规则或奖励露面，让读者期待进入。
+
+## 章纲使用方式
+
+- 新地图 = 新环境 + 新角色 + 新规则 + 新目标 + 新冲突。
+- 换地图前，旧地图核心冲突至少阶段性解决。
+- 换地图后前5章必须快速建立代入感、资源目标和主要压力源。
+- 地位升高时，环境危险度也要同步升高。`
+
 export const DEFAULT_BUILTIN_WRITING_SKILLS: UserSkill[] = [
   normalizeUserSkill({
     id: "builtin:chapter-connection",
@@ -1783,6 +1854,45 @@ export const DEFAULT_BUILTIN_WRITING_SKILLS: UserSkill[] = [
     tags: ["世界观", "设定", "信息"],
   }),
   normalizeUserSkill({
+    id: "builtin:setting-consistency",
+    name: "设定一致性",
+    description: "检查大纲、章纲和细纲里的规则、能力边界、信息公开度、代价限制和长期影响是否一致。",
+    kind: ["knowledge", "review"],
+    stages: ["planning", "review"],
+    modes: ["standard", "strict"],
+    content: settingConsistencyContent,
+    source: "built-in",
+    priority: 35,
+    tags: ["设定", "规则", "能力体系"],
+    categoryId: SKILL_ROUTE_CATEGORY_IDS.setting,
+  }),
+  normalizeUserSkill({
+    id: "builtin:faction-structure",
+    name: "势力结构",
+    description: "把组织、门派、家族、公司或官方机构设计成能持续制造资源、压力和剧情选择的结构。",
+    kind: ["knowledge", "structure"],
+    stages: ["planning"],
+    modes: ["standard", "strict"],
+    content: factionStructureContent,
+    source: "built-in",
+    priority: 35,
+    tags: ["势力", "组织", "阵营"],
+    categoryId: SKILL_ROUTE_CATEGORY_IDS.faction,
+  }),
+  normalizeUserSkill({
+    id: "builtin:map-progression",
+    name: "地图推进",
+    description: "设计新地图、换地图和阶段地图，让环境、势力、规则、资源和冲突同步升级。",
+    kind: ["knowledge", "structure"],
+    stages: ["planning"],
+    modes: ["standard", "strict"],
+    content: mapProgressionContent,
+    source: "built-in",
+    priority: 35,
+    tags: ["地图", "换地图", "势力"],
+    categoryId: SKILL_ROUTE_CATEGORY_IDS.map,
+  }),
+  normalizeUserSkill({
     id: "builtin:scene-description",
     name: "场景描写",
     description: "从功能定位出发，运用五感层次描写法构建有画面感、有氛围、服务剧情的场景。",
@@ -1842,6 +1952,7 @@ export const DEFAULT_BUILTIN_WRITING_SKILLS: UserSkill[] = [
     priority: 60,
     tags: ["金句", "台词", "记忆点"],
   }),
+  ...DEFAULT_SKILL_HUB_SKILLS,
 ]
 
 export function getBuiltinSkillIds(): Set<string> {
