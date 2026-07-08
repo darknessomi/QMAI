@@ -221,6 +221,109 @@ describe("OutlineFileTreePanel", () => {
     expect(deleteFileMock).toHaveBeenCalledWith("C:/Book/wiki/outlines/人物小传文件夹")
   })
 
+  it("迁移旧设定目录时合并同名默认子目录，不生成带序号的重复文件夹", async () => {
+    const migratedNodes: FileNode[] = [
+      {
+        name: "设定文件夹",
+        path: "C:/Book/wiki/outlines/设定文件夹",
+        is_dir: true,
+        children: [
+          {
+            name: "世界观",
+            path: "C:/Book/wiki/outlines/设定文件夹/世界观",
+            is_dir: true,
+            children: [
+              {
+                name: "规则.md",
+                path: "C:/Book/wiki/outlines/设定文件夹/世界观/规则.md",
+                is_dir: false,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        name: "设定",
+        path: "C:/Book/wiki/outlines/设定",
+        is_dir: true,
+        children: [
+          {
+            name: "世界观",
+            path: "C:/Book/wiki/outlines/设定/世界观",
+            is_dir: true,
+            children: [],
+          },
+        ],
+      },
+    ]
+    listDirectoryMock.mockResolvedValue(migratedNodes)
+    fileExistsMock.mockImplementation(async (path?: unknown) => path === "C:/Book/wiki/outlines/设定/世界观")
+
+    await act(async () => {
+      root.render(<OutlineFileTreePanel showHeader={false} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(copyFileMock).toHaveBeenCalledWith(
+      "C:/Book/wiki/outlines/设定文件夹/世界观/规则.md",
+      "C:/Book/wiki/outlines/设定/世界观/规则.md",
+    )
+    expect(copyFileMock).not.toHaveBeenCalledWith(
+      "C:/Book/wiki/outlines/设定文件夹/世界观/规则.md",
+      "C:/Book/wiki/outlines/设定/世界观-2/规则.md",
+    )
+    expect(deleteFileMock).toHaveBeenCalledWith("C:/Book/wiki/outlines/设定文件夹/世界观")
+    expect(deleteFileMock).toHaveBeenCalledWith("C:/Book/wiki/outlines/设定文件夹")
+  })
+
+  it("加载时清理设定下带序号的重复默认子目录", async () => {
+    const duplicatedNodes: FileNode[] = [
+      {
+        name: "设定",
+        path: "C:/Book/wiki/outlines/设定",
+        is_dir: true,
+        children: [
+          {
+            name: "世界观",
+            path: "C:/Book/wiki/outlines/设定/世界观",
+            is_dir: true,
+            children: [],
+          },
+          {
+            name: "世界观-2",
+            path: "C:/Book/wiki/outlines/设定/世界观-2",
+            is_dir: true,
+            children: [
+              {
+                name: "规则.md",
+                path: "C:/Book/wiki/outlines/设定/世界观-2/规则.md",
+                is_dir: false,
+              },
+            ],
+          },
+        ],
+      },
+    ]
+    listDirectoryMock.mockResolvedValue(duplicatedNodes)
+    fileExistsMock.mockResolvedValue(false)
+
+    await act(async () => {
+      root.render(<OutlineFileTreePanel showHeader={false} />)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(copyFileMock).toHaveBeenCalledWith(
+      "C:/Book/wiki/outlines/设定/世界观-2/规则.md",
+      "C:/Book/wiki/outlines/设定/世界观/规则.md",
+    )
+    expect(deleteFileMock).toHaveBeenCalledWith("C:/Book/wiki/outlines/设定/世界观-2/规则.md")
+    expect(deleteFileMock).toHaveBeenCalledWith("C:/Book/wiki/outlines/设定/世界观-2")
+  })
+
   it("右键文件夹后可新建文档、新建文件夹和删除文件夹", async () => {
     const promptSpy = vi.spyOn(window, "prompt")
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true)

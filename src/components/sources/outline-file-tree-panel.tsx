@@ -6,6 +6,7 @@ import { useOutlineChatStore } from "@/stores/outline-chat-store"
 import { OutlineFileTree } from "@/components/sources/outline-file-tree"
 import {
   DEFAULT_OUTLINE_FOLDER_PATHS,
+  DEFAULT_SETTING_FOLDER_NAMES,
   LEGACY_OUTLINE_FOLDER_MIGRATIONS,
   getDefaultOutlineFolderPath,
   getOutlineRoot,
@@ -57,11 +58,12 @@ async function resolveUniquePath(path: string): Promise<string> {
 async function migrateNodeChildren(sourceNode: FileNode, targetDir: string) {
   await createDirectory(targetDir)
   for (const child of sourceNode.children ?? []) {
-    const targetPath = await resolveUniquePath(`${targetDir}/${child.name}`)
     if (child.is_dir) {
+      const targetPath = `${targetDir}/${child.name}`
       await migrateNodeChildren(child, targetPath)
       await deleteFile(child.path)
     } else {
+      const targetPath = await resolveUniquePath(`${targetDir}/${child.name}`)
       await copyFile(child.path, targetPath)
       await deleteFile(child.path)
     }
@@ -79,6 +81,31 @@ async function migrateLegacyOutlineFolders(projectPath: string, nodes: FileNode[
     await deleteFile(source.path)
     migrated = true
   }
+  return migrated
+}
+
+function getDuplicatedDefaultSettingName(name: string): string | null {
+  const match = name.match(/^(.*)-\d+$/)
+  if (!match) return null
+  const baseName = match[1]?.trim()
+  return DEFAULT_SETTING_FOLDER_NAMES.some((item) => item === baseName) ? baseName : null
+}
+
+async function cleanupDuplicatedSettingFolders(nodes: FileNode[]): Promise<boolean> {
+  const settingNode = nodes.find((node) => node.is_dir && node.name === "设定")
+  if (!settingNode?.children?.length) return false
+
+  let migrated = false
+  for (const child of settingNode.children) {
+    if (!child.is_dir) continue
+    const baseName = getDuplicatedDefaultSettingName(child.name)
+    if (!baseName) continue
+    const targetDir = `${settingNode.path}/${baseName}`
+    await migrateNodeChildren(child, targetDir)
+    await deleteFile(child.path)
+    migrated = true
+  }
+
   return migrated
 }
 
@@ -128,7 +155,9 @@ export function OutlineFileTreePanel({ showHeader = true }: OutlineFileTreePanel
         const outlineRoot = getOutlineRoot(projectPath)
         const initialNodes = await listDirectory(outlineRoot)
         const migrated = await migrateLegacyOutlineFolders(projectPath, initialNodes)
-        const nodes = migrated ? await listDirectory(outlineRoot) : initialNodes
+        const afterMigrationNodes = migrated ? await listDirectory(outlineRoot) : initialNodes
+        const cleaned = await cleanupDuplicatedSettingFolders(afterMigrationNodes)
+        const nodes = cleaned ? await listDirectory(outlineRoot) : afterMigrationNodes
         if (cancelled) return
         setOutlineNodes(nodes)
       } catch (err) {
