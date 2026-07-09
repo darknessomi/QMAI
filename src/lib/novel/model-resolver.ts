@@ -166,3 +166,18 @@ export function resolveNovelModel(
 
   return toUnusableConfig(llmConfig)
 }
+
+export function formatResolvedModelLabel(
+  config: LlmConfig,
+  providerConfigs: Record<string, ProviderOverride>,
+): string {
+  const model = config.model.trim()
+  if (!model) return "未知模型"
+
+  for (const override of Object.values(providerConfigs)) {
+    const found = override.savedModels?.find((saved) => saved.model === model)
+    if (found?.name?.trim()) return found.name.trim()
+  }
+
+  return model
+}

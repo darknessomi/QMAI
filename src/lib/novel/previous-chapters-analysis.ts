@@ -19,6 +19,7 @@ export async function analyzePreviousChapters(
   currentChapterNumber: number,
   llmConfig: LlmConfig,
   analysisCount: number = 3,
+  signal?: AbortSignal,
 ): Promise<string> {
   if (currentChapterNumber <= 1) return ""
 
@@ -26,6 +27,7 @@ export async function analyzePreviousChapters(
 
   // 读取前N章的完整内容
   for (let i = Math.max(1, currentChapterNumber - analysisCount); i < currentChapterNumber; i++) {
+    if (signal?.aborted) throw new Error("已停止生成")
     try {
       const results = await searchWiki(projectPath, `chapter_number:${i}`)
       if (results.length > 0) {
@@ -55,9 +57,11 @@ export async function analyzePreviousChapters(
       onToken: (token) => { analysis += token },
       onDone: () => {},
       onError: () => {},
-    }
+    },
+    signal,
   )
 
+  if (signal?.aborted) throw new Error("已停止生成")
   return analysis.trim()
 }
 

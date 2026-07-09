@@ -1579,4 +1579,24 @@ describe("runDeepChapterGeneration", () => {
       controller.signal,
     )
   })
+
+  it("stops after review when the user cancels during review", async () => {
+    const controller = new AbortController()
+    const deps: DeepChapterGenerationDeps = {
+      ...createDeps(),
+      reviewChapter: vi.fn(async () => {
+        controller.abort()
+        throw new Error("已停止生成")
+      }),
+    }
+
+    await expect(runDeepChapterGeneration(
+      { projectPath: "E:/Novel", userRequest: "生成第3章", chapterNumber: 3, llmConfig },
+      {},
+      deps,
+      controller.signal,
+    )).rejects.toThrow("已停止生成")
+
+    expect(deps.streamChat).toHaveBeenCalledTimes(2)
+  })
 })

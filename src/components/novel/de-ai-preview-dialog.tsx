@@ -12,6 +12,7 @@ export interface DeAiPreviewDialogProps {
   sourceContent: string
   candidateContent: string
   skillName?: string
+  modelName?: string
   onApply: () => void
   onSaveDraft: () => void
   onClose: () => void
@@ -22,6 +23,7 @@ export function DeAiPreviewDialog({
   sourceContent,
   candidateContent,
   skillName,
+  modelName,
   onApply,
   onSaveDraft,
   onClose,
@@ -32,7 +34,10 @@ export function DeAiPreviewDialog({
         <DialogHeader>
           <DialogTitle>去AI味预览</DialogTitle>
           {skillName ? (
-            <div className="text-xs text-muted-foreground">本次使用 Skill：{skillName}</div>
+            <div className="text-xs text-muted-foreground">
+              本次使用 Skill：{skillName}
+              {modelName ? `，模型：${modelName}` : ""}
+            </div>
           ) : null}
         </DialogHeader>
         <div className="grid grid-cols-2 gap-4">

@@ -2,6 +2,7 @@ import type { LlmConfig } from "@/stores/wiki-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { streamChat, type ChatMessage, type RequestOverrides, type StreamCallbacks } from "@/lib/llm-client"
+import { USER_ABORT_MESSAGE } from "@/lib/user-abort"
 
 export interface DeepOutlineGenerationInput {
   llmConfig: LlmConfig
@@ -130,6 +131,7 @@ async function collectModelText(
     { reasoning: config.reasoning },
   )
 
+  if (signal?.aborted) throw new Error(USER_ABORT_MESSAGE)
   if (streamError) throw streamError
   return content.trim()
 }

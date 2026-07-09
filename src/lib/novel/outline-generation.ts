@@ -11,10 +11,15 @@ import { useImportProgressStore } from "@/stores/import-progress-store"
 import type { LlmConfig } from "@/stores/wiki-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
-import { ingestOutline } from "./chapter-ingest"
+import { mapWithConcurrency } from "@/lib/async-pool"
+import {
+  finalizeProjectMemoryRebuild,
+  ingestOutline,
+  syncSnapshotToMemory,
+  type OutlineIngestResult,
+} from "./chapter-ingest"
 import { buildContextPack, type ContextPack } from "./context-engine"
-import { resolveDefaultModel, resolveModelConfig } from "@/lib/novel/model-resolver"
-import { readSoulDoc } from "./soul-doc"
+import { resolveDefaultModel, resolveModelConfig, resolveNovelModel } from "@/lib/novel/model-resolver"
 
 export type OutlineSectionGenerationKey =
   | "chapterOutlines"
@@ -131,7 +136,6 @@ function appendContextSection(sections: string[], title: string, content: string
 
 function formatOutlineRefinementContext(pack: ContextPack): string {
   const sections: string[] = []
-  appendContextSection(sections, "作品灵魂与总则", pack.soulDoc)
   appendContextSection(sections, "已有大纲", pack.outline)
   appendContextSection(sections, "最近剧情摘要", pack.recentSummaries)
   appendContextSection(sections, "人物状态变化", pack.characterStates)
@@ -233,58 +237,6 @@ async function safeBuildOutlineContextPack(projectPath: string, task: string): P
   }
 }
 
-async function ensureSoulDocInPrompt(projectPath: string, prompt: string): Promise<string> {
-  let nextPrompt = prompt
-  try {
-    if (!nextPrompt.includes("作品灵魂") && !nextPrompt.includes("soulDoc") && !nextPrompt.includes("灵魂与总则")) {
-      const soulDoc = await readSoulDoc(projectPath)
-      if (soulDoc.trim()) {
-        nextPrompt = `## 作品灵魂与总则\n${soulDoc}\n\n${nextPrompt}`
-      }
-    }
-  } catch {}
-  if (!nextPrompt.includes("## AI大纲生成工作流")) {
-    nextPrompt = [
-      "## AI大纲生成工作流",
-      "提取请求关键词，识别用户意图，读取已有大纲、章节、记忆和推演信息，提取对小说创作有用的关键内容，再结合用户要用的 skill + soul.md 约束生成。",
-      "最终回复只输出大纲标题和大纲正文；不要输出工具调用报告、分析过程、完成报告、下一步行动。",
-      "",
-      nextPrompt,
-    ].join("\n")
-  }
-  return nextPrompt
-}
-
-function getOutlineRefinementOutputRules(config: OutlineSectionGenerationConfig): string {
-  switch (config.key) {
-    case "chapterOutlines":
-      return "章节细纲必须按章节写清：章节目标、核心事件、冲突、转折、结尾钩子、承接关系。"
-    case "characterBriefs":
-      return "人物小传必须写清：人物定位、目标与动机、欲望和恐惧、关系变化、冲突点、成长或崩坏路径。"
-    case "organizationsOutline":
-      return "组织势力设定必须写清：阵营目标、资源、内部矛盾、外部冲突、剧情作用、与主角线关系。"
-    case "powerSystem":
-      return "金手指与能力体系必须写清：规则、限制、代价、成长路径、反制方式、剧情用途。"
-    case "foreshadowingPlan":
-      return "伏笔计划必须写清：伏笔名称、埋设位置、表层误导、真实指向、推进节点、回收位置。"
-    case "locationsOutline":
-      return "地点设定必须写清：地点定位、所属势力、空间规则、资源与限制、可触发事件、剧情作用。"
-  }
-}
-
-function buildOutlineRefinementWorkflowPrompt(config: OutlineSectionGenerationConfig): string {
-  return [
-    "## AI大纲生成工作流",
-    "1. 提取请求关键词：确认要生成的大纲分项、范围和已有约束。",
-    "2. 识别用户意图：本次是生成/完善大纲正文，不是审稿报告、工具报告或分析说明。",
-    "3. 提取对小说创作有用的关键内容：章节目标、冲突、伏笔、人物动机、设定限制、时间线承接和结尾钩子。",
-    "4. 结合用户要用的 skill + soul.md 约束，生成可直接保存的大纲正文。",
-    "5. 结果强约束收敛：最终回复只输出大纲标题和大纲正文。",
-    "不要输出工具调用报告、分析过程、完成报告、下一步行动。",
-    getOutlineRefinementOutputRules(config),
-  ].join("\n")
-}
-
 function buildSectionRefinementPrompt(
   context: string,
   config: OutlineSectionGenerationConfig,
@@ -299,9 +251,6 @@ function buildSectionRefinementPrompt(
     "2. 本次用户要求只能用于补充、聚焦和完善，不得改写既定主线和核心设定。",
     "3. 如果信息不足，只能做最小必要补完，且必须与现有设定兼容。",
     "4. 只输出正文 Markdown，不要输出 JSON、代码块、解释、前言或额外说明。",
-    "5. 不要输出工具调用报告、分析过程、完成报告、下一步行动。",
-    "",
-    buildOutlineRefinementWorkflowPrompt(config),
     "",
     "已有大纲与项目记忆：",
     context || "当前暂无可读取的项目记忆，请仅基于已有大纲与本次要求进行细化。",
@@ -476,8 +425,7 @@ export async function generateOutlineFile(
   let content = ""
   let streamError: Error | null = null
 
-  const safePrompt = await ensureSoulDocInPrompt(projectPath, prompt)
-  const messages: ChatMessage[] = [{ role: "user", content: safePrompt }]
+  const messages: ChatMessage[] = [{ role: "user", content: prompt }]
 
   await streamChat(llmConfig, messages, {
     onToken: (token) => {
@@ -701,6 +649,398 @@ export function createOutlineIngestTask(projectPath: string, outlinePath: string
   })
 }
 
+export class OutlineIngestNotReadyError extends Error {
+  constructor() {
+    super(i18n.t("novel.outlineGenerator.ingestNoLlm"))
+    this.name = "OutlineIngestNotReadyError"
+  }
+}
+
+export function assertOutlineIngestLlmReady(): void {
+  const state = useWikiStore.getState()
+  const runtimeLlmConfig = resolveNovelModel(state.llmConfig, state.novelConfig, "extract")
+  if (!hasUsableLlm(runtimeLlmConfig, state.providerConfigs)) {
+    throw new OutlineIngestNotReadyError()
+  }
+}
+
+export const BULK_OUTLINE_INGEST_CONCURRENCY = 2
+
+export interface OutlineIngestFailure {
+  name: string
+  path: string
+  reason: string
+}
+
+export interface BulkOutlineIngestResult {
+  total: number
+  succeeded: number
+  failed: number
+  cancelled?: boolean
+  failures: OutlineIngestFailure[]
+}
+
+export interface RunOutlineIngestPathsOptions {
+  onProgressTaskStarted?: (taskId: string) => void
+}
+
+export interface OutlineIngestTaskResult {
+  success: boolean
+  outlinePath: string
+  outlineFileName: string
+  error?: string
+  truncated?: boolean
+  bodyLength?: number
+  originalLength?: number
+  bodyBudget?: number
+}
+
+export interface RunOutlineIngestTaskOptions {
+  signal?: AbortSignal
+  parentProgressId?: string
+  manageProgress?: boolean
+}
+
+import { getOutlineFileName } from "./outline-ingest-utils"
+
+function buildOutlineIngestFailureReason(err: unknown): string {
+  if (err instanceof Error) return err.message
+  return String(err)
+}
+
+function getOutlineIngestCancelledMessage(): string {
+  return i18n.t("novel.outlineGenerator.ingestCancelledNotification")
+}
+
+function finalizeOutstandingIngestTasks(taskIds: string[], cancelled: boolean): void {
+  const message = cancelled
+    ? getOutlineIngestCancelledMessage()
+    : i18n.t("novel.outlineGenerator.ingestFailedNotification")
+  for (const taskId of taskIds) {
+    const task = useOutlineGenerationStore.getState().tasks.find((item) => item.id === taskId)
+    if (task?.status !== "ingesting") continue
+    useOutlineGenerationStore.getState().updateTask(taskId, {
+      status: "error",
+      message,
+      error: message,
+    })
+  }
+}
+
+/** Clear orphaned ingest tasks when no outline import progress is running. */
+export function reconcileStaleOutlineIngestTasks(projectPath: string): void {
+  const pp = normalizePath(projectPath)
+  const hasRunningOutlineImport = useImportProgressStore.getState().tasks.some(
+    (task) => task.projectPath === pp && task.kind === "outline" && task.status === "running",
+  )
+  if (hasRunningOutlineImport) return
+
+  const message = getOutlineIngestCancelledMessage()
+  for (const task of useOutlineGenerationStore.getState().tasks) {
+    if (task.projectPath !== pp || task.kind !== "ingest" || task.status !== "ingesting") continue
+    useOutlineGenerationStore.getState().updateTask(task.id, {
+      status: "error",
+      message,
+      error: message,
+    })
+  }
+}
+
+function buildBulkIngestProgressMessage(result: BulkOutlineIngestResult): string {
+  if (result.cancelled) {
+    return i18n.t("novel.outlineGenerator.bulkIngestCancelledProgress", {
+      succeeded: result.succeeded,
+      total: result.total,
+    })
+  }
+  if (result.failed > 0) {
+    const preview = result.failures
+      .slice(0, 3)
+      .map((failure) => `${failure.name}: ${failure.reason}`)
+      .join("；")
+    return i18n.t("novel.outlineGenerator.bulkIngestProgressWithFailures", {
+      succeeded: result.succeeded,
+      failed: result.failed,
+      preview,
+    })
+  }
+  return i18n.t("novel.outlineGenerator.bulkIngestProgressDone", {
+    succeeded: result.succeeded,
+    total: result.total,
+  })
+}
+
+export function formatBulkOutlineIngestResult(result: BulkOutlineIngestResult): string {
+  if (result.total === 0) {
+    return i18n.t("novel.outlineGenerator.bulkIngestEmpty")
+  }
+  if (result.cancelled) {
+    return i18n.t("novel.outlineGenerator.bulkIngestCancelled", {
+      succeeded: result.succeeded,
+      failed: result.failed,
+      total: result.total,
+    })
+  }
+  if (result.failed === 0) {
+    return i18n.t("novel.outlineGenerator.bulkIngestResult", {
+      total: result.total,
+      succeeded: result.succeeded,
+      failed: result.failed,
+    })
+  }
+
+  const lines = result.failures
+    .slice(0, 5)
+    .map((failure) => `· ${failure.name}: ${failure.reason}`)
+  const extra = result.failures.length > 5
+    ? `\n${i18n.t("novel.outlineGenerator.bulkIngestMoreFailures", { count: result.failures.length - 5 })}`
+    : ""
+
+  return [
+    i18n.t("novel.outlineGenerator.bulkIngestResultWithFailures", {
+      total: result.total,
+      succeeded: result.succeeded,
+      failed: result.failed,
+    }),
+    ...lines,
+  ].join("\n") + extra
+}
+
+type OutlineExtractOutcome =
+  | { kind: "success"; path: string; taskId: string; ingestResult: OutlineIngestResult }
+  | { kind: "failure"; path: string; taskId: string; reason: string }
+  | { kind: "skipped"; path: string; taskId: string }
+
+export async function runOutlineIngestPaths(
+  projectPath: string,
+  outlinePaths: string[],
+  options?: RunOutlineIngestPathsOptions,
+): Promise<BulkOutlineIngestResult> {
+  assertOutlineIngestLlmReady()
+
+  const pp = normalizePath(projectPath)
+  const normalizedPaths = outlinePaths.map((path) => normalizePath(path))
+  if (normalizedPaths.length === 0) {
+    return { total: 0, succeeded: 0, failed: 0, failures: [] }
+  }
+
+  const abortController = new AbortController()
+  const signal = abortController.signal
+  const taskIds = normalizedPaths.map((outlinePath) => createOutlineIngestTask(pp, outlinePath))
+  const progressTaskId = useImportProgressStore.getState().startTask({
+    projectPath: pp,
+    kind: "outline",
+    total: normalizedPaths.length,
+    currentTitle: getOutlineFileName(normalizedPaths[0] ?? ""),
+    message: i18n.t("novel.outlineGenerator.bulkIngesting"),
+    abortController,
+    concurrency: BULK_OUTLINE_INGEST_CONCURRENCY,
+    activeTitles: [],
+  })
+  options?.onProgressTaskStarted?.(progressTaskId)
+
+  const failures: OutlineIngestFailure[] = []
+  const extractProgress = {
+    completed: 0,
+    inFlight: new Set<string>(),
+  }
+
+  function publishExtractProgress(): void {
+    const activeTitles = [...extractProgress.inFlight]
+    useImportProgressStore.getState().updateTask(progressTaskId, {
+      completed: extractProgress.completed,
+      currentTitle: activeTitles[0] ?? "",
+      activeTitles,
+      concurrency: BULK_OUTLINE_INGEST_CONCURRENCY,
+      message: activeTitles.length > 1
+        ? i18n.t("novel.outlineGenerator.bulkIngestParallel", {
+          active: activeTitles.length,
+          concurrency: BULK_OUTLINE_INGEST_CONCURRENCY,
+        })
+        : i18n.t("novel.outlineGenerator.bulkIngesting"),
+    })
+  }
+
+  const extractOutcomes = (await mapWithConcurrency(
+    normalizedPaths,
+    BULK_OUTLINE_INGEST_CONCURRENCY,
+    async (outlinePath, index) => {
+      const outlineFileName = getOutlineFileName(outlinePath)
+      const taskId = taskIds[index]!
+
+      if (signal.aborted) {
+        useOutlineGenerationStore.getState().updateTask(taskId, {
+          status: "error",
+          message: getOutlineIngestCancelledMessage(),
+          error: getOutlineIngestCancelledMessage(),
+        })
+        return { kind: "skipped", path: outlinePath, taskId } satisfies OutlineExtractOutcome
+      }
+
+      extractProgress.inFlight.add(outlineFileName)
+      publishExtractProgress()
+
+      useOutlineGenerationStore.getState().updateTask(taskId, {
+        status: "ingesting",
+        message: i18n.t("novel.outlineGenerator.ingestingNotification"),
+        error: null,
+      })
+
+      try {
+        const ingestResult = await ingestOutline(pp, outlinePath, signal, { skipSync: true })
+        if (ingestResult.failureReason === "no_llm") {
+          const reason = i18n.t("novel.outlineGenerator.ingestNoLlm")
+          useOutlineGenerationStore.getState().updateTask(taskId, {
+            status: "error",
+            message: reason,
+            error: reason,
+          })
+          return { kind: "failure", path: outlinePath, taskId, reason } satisfies OutlineExtractOutcome
+        }
+        if (!ingestResult.snapshot) {
+          const reason = i18n.t("novel.outlineGenerator.ingestFailedNotification")
+          useOutlineGenerationStore.getState().updateTask(taskId, {
+            status: "error",
+            message: reason,
+            error: reason,
+          })
+          return { kind: "failure", path: outlinePath, taskId, reason } satisfies OutlineExtractOutcome
+        }
+        return { kind: "success", path: outlinePath, taskId, ingestResult } satisfies OutlineExtractOutcome
+      } catch (err) {
+        const reason = buildOutlineIngestFailureReason(err)
+        useOutlineGenerationStore.getState().updateTask(taskId, {
+          status: "error",
+          message: reason,
+          error: reason,
+        })
+        return { kind: "failure", path: outlinePath, taskId, reason } satisfies OutlineExtractOutcome
+      } finally {
+        extractProgress.inFlight.delete(outlineFileName)
+        if (!signal.aborted) {
+          extractProgress.completed += 1
+        } else {
+          const task = useOutlineGenerationStore.getState().tasks.find((item) => item.id === taskId)
+          if (task?.status === "ingesting") {
+            useOutlineGenerationStore.getState().updateTask(taskId, {
+              status: "error",
+              message: getOutlineIngestCancelledMessage(),
+              error: getOutlineIngestCancelledMessage(),
+            })
+          }
+        }
+        publishExtractProgress()
+      }
+    },
+    { signal },
+  )).filter((outcome): outcome is OutlineExtractOutcome => outcome != null)
+
+  const cancelled = signal.aborted
+  const extractSuccesses = extractOutcomes.filter(
+    (outcome): outcome is Extract<OutlineExtractOutcome, { kind: "success" }> => outcome.kind === "success",
+  )
+
+  for (const outcome of extractOutcomes) {
+    if (outcome.kind === "failure") {
+      failures.push({
+        name: getOutlineFileName(outcome.path),
+        path: outcome.path,
+        reason: outcome.reason,
+      })
+    }
+  }
+
+  let succeeded = 0
+  let syncCompleted = 0
+
+  for (const item of extractSuccesses) {
+    if (signal.aborted) break
+
+    const outlineFileName = getOutlineFileName(item.path)
+    useImportProgressStore.getState().updateTask(progressTaskId, {
+      completed: syncCompleted,
+      currentTitle: i18n.t("novel.outlineGenerator.bulkIngestSyncing", { name: outlineFileName }),
+      activeTitles: [outlineFileName],
+      concurrency: 1,
+      message: i18n.t("novel.outlineGenerator.bulkIngestSyncing", { name: outlineFileName }),
+    })
+
+    try {
+      await syncSnapshotToMemory(pp, item.ingestResult.snapshot!, {
+        deferStructuredMemoryExport: true,
+        deferDerivedRebuild: true,
+      })
+      const successMessage = item.ingestResult.truncated
+        ? i18n.t("novel.outlineGenerator.ingestSuccessTruncatedNotification", {
+          used: item.ingestResult.bodyLength,
+          total: item.ingestResult.originalLength,
+          budget: item.ingestResult.bodyBudget,
+        })
+        : i18n.t("novel.outlineGenerator.ingestSuccessNotification")
+      useOutlineGenerationStore.getState().updateTask(item.taskId, {
+        status: "done",
+        message: successMessage,
+        error: null,
+      })
+      succeeded += 1
+    } catch (err) {
+      const reason = buildOutlineIngestFailureReason(err)
+      useOutlineGenerationStore.getState().updateTask(item.taskId, {
+        status: "error",
+        message: reason,
+        error: reason,
+      })
+      failures.push({
+        name: outlineFileName,
+        path: item.path,
+        reason,
+      })
+    } finally {
+      syncCompleted += 1
+      useImportProgressStore.getState().updateTask(progressTaskId, {
+        completed: syncCompleted,
+        activeTitles: [],
+      })
+    }
+  }
+
+  if (succeeded > 0) {
+    await finalizeProjectMemoryRebuild(pp)
+    await refreshProjectState(pp)
+  }
+
+  const result: BulkOutlineIngestResult = {
+    total: normalizedPaths.length,
+    succeeded,
+    failed: failures.length,
+    cancelled: cancelled || undefined,
+    failures,
+  }
+
+  useImportProgressStore.getState().finishTask(
+    progressTaskId,
+    cancelled ? "cancelled" : failures.length > 0 ? "error" : "done",
+    {
+      completed: syncCompleted,
+      total: normalizedPaths.length,
+      currentTitle: "",
+      activeTitles: [],
+      message: buildBulkIngestProgressMessage(result),
+    },
+  )
+
+  finalizeOutstandingIngestTasks(taskIds, cancelled)
+
+  return result
+}
+
+export async function runSingleOutlineIngest(
+  projectPath: string,
+  outlinePath: string,
+): Promise<BulkOutlineIngestResult> {
+  return runOutlineIngestPaths(projectPath, [normalizePath(outlinePath)])
+}
+
 export function startOutlineIngestTask(projectPath: string, outlinePath: string): string {
   const taskId = createOutlineIngestTask(projectPath, outlinePath)
   void runOutlineIngestTask(taskId)
@@ -723,11 +1063,7 @@ function collectOutlineMarkdownPaths(
   return paths
 }
 
-export async function runBulkOutlineIngest(projectPath: string): Promise<{
-  total: number
-  succeeded: number
-  failed: number
-}> {
+export async function runBulkOutlineIngest(projectPath: string): Promise<BulkOutlineIngestResult> {
   const pp = normalizePath(projectPath)
   let outlinePaths: string[] = []
 
@@ -736,41 +1072,36 @@ export async function runBulkOutlineIngest(projectPath: string): Promise<{
     outlinePaths = collectOutlineMarkdownPaths(tree as Array<{ path: string; name: string; is_dir: boolean; children?: Array<{ path: string; name: string; is_dir: boolean; children?: unknown[] }> }>)
       .sort((a, b) => a.localeCompare(b, "zh-CN"))
   } catch {
-    return { total: 0, succeeded: 0, failed: 0 }
+    return { total: 0, succeeded: 0, failed: 0, failures: [] }
   }
 
-  let succeeded = 0
-  let failed = 0
-
-  for (const outlinePath of outlinePaths) {
-    const taskId = createOutlineIngestTask(pp, outlinePath)
-    await runOutlineIngestTask(taskId)
-    const task = useOutlineGenerationStore.getState().tasks.find((item) => item.id === taskId)
-    if (task?.status === "done") succeeded += 1
-    else failed += 1
-  }
-
-  return {
-    total: outlinePaths.length,
-    succeeded,
-    failed,
-  }
+  return runOutlineIngestPaths(pp, outlinePaths)
 }
 
-export async function runOutlineIngestTask(taskId: string): Promise<void> {
+export async function runOutlineIngestTask(
+  taskId: string,
+  options: RunOutlineIngestTaskOptions = {},
+): Promise<OutlineIngestTaskResult | null> {
   const task = useOutlineGenerationStore.getState().tasks.find((item) => item.id === taskId)
-  if (!task?.outlinePath) return
+  if (!task?.outlinePath) return null
 
-  const outlineFileName = task.outlinePath.split("/").pop()?.replace(".md", "") || "大纲"
-  const abortController = new AbortController()
-  const progressTaskId = useImportProgressStore.getState().startTask({
-    projectPath: task.projectPath,
-    kind: "outline",
-    total: 1,
-    currentTitle: outlineFileName,
-    message: "正在提取大纲记忆",
-    abortController,
-  })
+  const outlinePath = task.outlinePath
+  const outlineFileName = getOutlineFileName(outlinePath)
+  const manageProgress = options.manageProgress !== false
+  const abortController = options.signal ? null : new AbortController()
+  const signal = options.signal ?? abortController!.signal
+  let progressTaskId = options.parentProgressId
+
+  if (manageProgress && !progressTaskId) {
+    progressTaskId = useImportProgressStore.getState().startTask({
+      projectPath: task.projectPath,
+      kind: "outline",
+      total: 1,
+      currentTitle: outlineFileName,
+      message: "正在提取大纲记忆",
+      abortController: abortController ?? undefined,
+    })
+  }
 
   try {
     useOutlineGenerationStore.getState().updateTask(taskId, {
@@ -778,35 +1109,90 @@ export async function runOutlineIngestTask(taskId: string): Promise<void> {
       message: i18n.t("novel.outlineGenerator.ingestingNotification"),
       error: null,
     })
-    const snapshot = await ingestOutline(task.projectPath, task.outlinePath, abortController.signal)
+    const ingestResult = await ingestOutline(task.projectPath, outlinePath, signal)
+    const snapshot = ingestResult.snapshot
+
+    if (ingestResult.failureReason === "no_llm") {
+      const reason = i18n.t("novel.outlineGenerator.ingestNoLlm")
+      useOutlineGenerationStore.getState().updateTask(taskId, {
+        status: "error",
+        message: reason,
+        error: reason,
+      })
+      if (manageProgress && progressTaskId) {
+        useImportProgressStore.getState().finishTask(progressTaskId, "error", {
+          completed: 0,
+          total: 1,
+          currentTitle: "",
+          message: `${outlineFileName} 提取失败：${reason}`,
+        })
+      }
+      return { success: false, outlinePath, outlineFileName, error: reason }
+    }
+
     if (snapshot) {
       await refreshProjectState(task.projectPath)
     }
+
+    const successMessage = snapshot
+      ? ingestResult.truncated
+        ? i18n.t("novel.outlineGenerator.ingestSuccessTruncatedNotification", {
+          used: ingestResult.bodyLength,
+          total: ingestResult.originalLength,
+          budget: ingestResult.bodyBudget,
+        })
+        : i18n.t("novel.outlineGenerator.ingestSuccessNotification")
+      : i18n.t("novel.outlineGenerator.ingestFailedNotification")
+    const errorMessage = snapshot ? undefined : i18n.t("novel.outlineGenerator.ingestFailedNotification")
+
     useOutlineGenerationStore.getState().updateTask(taskId, {
       status: snapshot ? "done" : "error",
-      message: snapshot
-        ? i18n.t("novel.outlineGenerator.ingestSuccessNotification")
-        : i18n.t("novel.outlineGenerator.ingestFailedNotification"),
-      error: snapshot ? null : i18n.t("novel.outlineGenerator.ingestFailedNotification"),
+      message: successMessage,
+      error: errorMessage ?? null,
     })
-    useImportProgressStore.getState().finishTask(progressTaskId, snapshot ? "done" : "error", {
-      completed: snapshot ? 1 : 0,
-      total: 1,
-      currentTitle: "",
-      message: snapshot ? `${outlineFileName} 提取完成` : `${outlineFileName} 提取失败`,
-    })
+
+    if (manageProgress && progressTaskId) {
+      useImportProgressStore.getState().finishTask(progressTaskId, snapshot ? "done" : "error", {
+        completed: snapshot ? 1 : 0,
+        total: 1,
+        currentTitle: "",
+        message: snapshot
+          ? ingestResult.truncated
+            ? i18n.t("novel.outlineGenerator.ingestProgressTruncated", {
+              name: outlineFileName,
+              used: ingestResult.bodyLength,
+              total: ingestResult.originalLength,
+            })
+            : `${outlineFileName} 提取完成`
+          : `${outlineFileName} 提取失败`,
+      })
+    }
+
+    return {
+      success: Boolean(snapshot),
+      outlinePath,
+      outlineFileName,
+      error: errorMessage,
+      truncated: ingestResult.truncated,
+      bodyLength: ingestResult.bodyLength,
+      originalLength: ingestResult.originalLength,
+      bodyBudget: ingestResult.bodyBudget,
+    }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = buildOutlineIngestFailureReason(err)
     useOutlineGenerationStore.getState().updateTask(taskId, {
       status: "error",
       message,
       error: message,
     })
-    useImportProgressStore.getState().finishTask(progressTaskId, "error", {
-      completed: 0,
-      total: 1,
-      currentTitle: "",
-      message: `${outlineFileName} 提取失败`,
-    })
+    if (manageProgress && progressTaskId) {
+      useImportProgressStore.getState().finishTask(progressTaskId, "error", {
+        completed: 0,
+        total: 1,
+        currentTitle: "",
+        message: `${outlineFileName} 提取失败：${message}`,
+      })
+    }
+    return { success: false, outlinePath, outlineFileName, error: message }
   }
 }
