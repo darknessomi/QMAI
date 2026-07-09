@@ -7,6 +7,7 @@ import { contextPackToPrompt, buildContextPack, type ContextPack } from "./conte
 import { buildCharacterAuraContext } from "./character-aura"
 import { resolveNovelModel } from "./model-resolver"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
+import { rethrowIfUserAbort } from "@/lib/user-abort"
 
 export interface NovelReviewResult {
   severity: "error" | "warning" | "info"
@@ -309,6 +310,7 @@ ${langReminder}`
 
     return chunkResults.flat()
   } catch (err) {
+    rethrowIfUserAbort(err, signal)
     console.error("[Novel Review] Failed:", err)
     return []
   }

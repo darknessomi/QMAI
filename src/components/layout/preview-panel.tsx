@@ -2,7 +2,7 @@
 import { useTranslation } from "react-i18next"
 import { Check, MoreHorizontal, X } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
-import { resolveDefaultModel, resolveNovelModel } from "@/lib/novel/model-resolver"
+import { resolveDefaultModel, resolveNovelModel, formatResolvedModelLabel } from "@/lib/novel/model-resolver"
 import type { FinalChapterSavePhase } from "@/stores/wiki-store"
 import { useReviewStore } from "@/stores/review-store"
 import { deleteFile, fileExists, readFile, writeFile, writeFileAtomic, listDirectory } from "@/commands/fs"
@@ -30,7 +30,8 @@ import {
   saveDeAiSkillConfig,
   setLastChapterDeAiSkill,
 } from "@/lib/novel/de-ai-skill-library"
-import { startOutlineIngestTask } from "@/lib/novel/outline-ingest"
+import { startOutlineIngestTask } from "@/lib/novel/outline-generation"
+import { getOutlineIngestIdentity, getOutlineFileName, outlineSnapshotExists } from "@/lib/novel/outline-ingest-utils"
 import { streamChat } from "@/lib/llm-client"
 import {
   extractChapterNumberFromMarkdown,
@@ -174,6 +175,7 @@ export function PreviewPanel() {
   const pendingEditorHighlight = useWikiStore((s) => s.pendingEditorHighlight)
   const setPendingEditorHighlight = useWikiStore((s) => s.setPendingEditorHighlight)
   const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
+  const dataVersion = useWikiStore((s) => s.dataVersion)
   const finalChapterSave = useWikiStore((s) => s.finalChapterSave)
   const setFinalChapterSave = useWikiStore((s) => s.setFinalChapterSave)
   const outlineTasks = useOutlineGenerationStore((s) => s.tasks)
@@ -192,6 +194,7 @@ export function PreviewPanel() {
   const [deAiSourceContent, setDeAiSourceContent] = useState("")
   const [deAiCandidateContent, setDeAiCandidateContent] = useState("")
   const [deAiSkillName, setDeAiSkillName] = useState("")
+  const [deAiModelName, setDeAiModelName] = useState("")
   const [deAiSkillMemoryWarning, setDeAiSkillMemoryWarning] = useState("")
   const [selectionTransformOpen, setSelectionTransformOpen] = useState(false)
   const [selectionTransformAction, setSelectionTransformAction] = useState<ChapterSelectionAction | null>(null)
@@ -199,6 +202,7 @@ export function PreviewPanel() {
   const [selectionTransformSourceContent, setSelectionTransformSourceContent] = useState("")
   const [selectionTransformCandidateContent, setSelectionTransformCandidateContent] = useState("")
   const [selectionTransformSkillName, setSelectionTransformSkillName] = useState("")
+  const [selectionTransformModelName, setSelectionTransformModelName] = useState("")
   const [deAiSkillPickerOpen, setDeAiSkillPickerOpen] = useState(false)
   const [deAiSkillPickerPosition, setDeAiSkillPickerPosition] = useState<CSSProperties>(() => getDeAiSkillPickerPosition())
   const [chapterDeAiSkillId, setChapterDeAiSkillId] = useState<string | null | undefined>(undefined)
@@ -390,7 +394,9 @@ export function PreviewPanel() {
     setSelectionTransformOpen(false)
     setDeAiPreviewOpen(false)
     setDeAiSkillName("")
+    setDeAiModelName("")
     setSelectionTransformSkillName("")
+    setSelectionTransformModelName("")
     setLoadedFilePath(null)
 
     if (!selectedFile) {
@@ -551,6 +557,26 @@ export function PreviewPanel() {
       .sort((a: OutlineGenerationTask, b: OutlineGenerationTask) => b.updatedAt - a.updatedAt)[0] ?? null
   }, [canIngestOutline, outlineTasks, project, selectedFile])
 
+  const outlineIngestProgressRunning = useImportProgressStore((s) => {
+    if (!project || !canIngestOutline || !selectedFile) return null
+    const pp = normalizePath(project.path)
+    return s.tasks.find((task) => (
+      task.projectPath === pp &&
+      task.kind === "outline" &&
+      task.status === "running"
+    )) ?? null
+  })
+  const isOutlineIngesting = useMemo(() => {
+    if (!project || !selectedFile || !canIngestOutline) return false
+    const fileName = getOutlineFileName(selectedFile)
+    if (outlineIngestProgressRunning) {
+      if (outlineIngestProgressRunning.total === 1) return true
+      if (outlineIngestProgressRunning.currentTitle === fileName) return true
+      if (outlineIngestProgressRunning.activeTitles?.includes(fileName)) return true
+    }
+    return currentOutlineTask?.status === "ingesting"
+  }, [canIngestOutline, currentOutlineTask, outlineIngestProgressRunning, project, selectedFile])
+
   // 检测大纲是否已经提取过初始记忆（持久化状态）
   useEffect(() => {
     if (!canIngestOutline || !project || !selectedFile) {
@@ -558,24 +584,29 @@ export function PreviewPanel() {
       setOutlineSnapshotNumber(null)
       return
     }
-    const normalizedOutlinePath = normalizePath(selectedFile)
-    const fileName = normalizedOutlinePath.split("/").pop() ?? "outline"
-    const outlineName = fileName.replace(/\.\w+$/, "")
-    let hash = 0
-    for (let i = 0; i < outlineName.length; i++) {
-      hash = ((hash << 5) - hash + outlineName.charCodeAt(i)) | 0
+    const { chapterNumber } = getOutlineIngestIdentity(project.path, selectedFile)
+    setOutlineSnapshotNumber(chapterNumber)
+    let cancelled = false
+    void outlineSnapshotExists(project.path, selectedFile)
+      .then((exists) => {
+        if (!cancelled) setOutlineIngested(exists)
+      })
+      .catch(() => {
+        if (!cancelled) setOutlineIngested(false)
+      })
+    return () => {
+      cancelled = true
     }
-    const outlineNum = -(Math.abs(hash % 999) + 1)
-    setOutlineSnapshotNumber(outlineNum)
-    const prefix = `outline-${String(Math.abs(outlineNum)).padStart(3, "0")}`
-    const jsonPath = `${normalizePath(project.path)}/.novel/snapshots/${prefix}.snapshot.json`
-    fileExists(jsonPath).then((exists) => setOutlineIngested(exists)).catch(() => setOutlineIngested(false))
-  }, [canIngestOutline, project, selectedFile])
+  }, [canIngestOutline, project, selectedFile, dataVersion, currentOutlineTask?.status, currentOutlineTask?.updatedAt])
   useEffect(() => {
     if (!canIngestOutline) return
     if (!currentOutlineTask?.message) return
+    if (currentOutlineTask.status === "ingesting" && !outlineIngestProgressRunning) {
+      setSaveStatus("")
+      return
+    }
     setSaveStatus(currentOutlineTask.message)
-  }, [canIngestOutline, currentOutlineTask])
+  }, [canIngestOutline, currentOutlineTask, outlineIngestProgressRunning])
   const chapterNumber = useMemo(() => {
     if (!chapterFrontmatter) return null
     const meta = parseChapterMeta(chapterFrontmatter)
@@ -584,7 +615,6 @@ export function PreviewPanel() {
   const canViewSnapshot = Boolean(novelMode && project && chapterNumber !== null)
   const currentFinalChapterSave = finalChapterSave != null && finalChapterSave.projectPath === project?.path && finalChapterSave.filePath === selectedFile ? finalChapterSave : null
   const isFinalChapterSaving = currentFinalChapterSave?.saving ?? isSavingFinal
-  const isOutlineIngesting = currentOutlineTask?.status === "ingesting"
 
   const phaseLabelMap: Record<FinalChapterSavePhase, string> = {
     saving: t("novel.chapter.savingAsFinal"),
@@ -949,12 +979,14 @@ export function PreviewPanel() {
     setDeAiSkillName(skillName)
     const state = useWikiStore.getState()
     const llmConfig = resolveNovelModel(state.llmConfig, state.novelConfig, "deAi")
+    const modelLabel = formatResolvedModelLabel(llmConfig, state.providerConfigs)
+    setDeAiModelName(modelLabel)
     if (!hasUsableLlm(llmConfig, state.providerConfigs)) {
       setDeAiProcessing(false)
       setSaveStatus("未配置可用的 AI 模型，无法去AI味")
       return
     }
-    setSaveStatus(formatDeAiStatus(`去AI味处理中，使用 Skill：${skillName}...`))
+    setSaveStatus(formatDeAiStatus(`去AI味处理中，使用 Skill：${skillName}，模型：${modelLabel}...`))
     let result = ""
     try {
       await streamChat(
@@ -969,7 +1001,7 @@ export function PreviewPanel() {
             setDeAiCandidateContent(result)
             setDeAiPreviewOpen(true)
             setDeAiProcessing(false)
-            setSaveStatus(formatDeAiStatus(`本次使用 Skill：${skillName}`))
+            setSaveStatus(formatDeAiStatus(`本次使用 Skill：${skillName}，模型：${modelLabel}`))
           },
           onError: (error) => {
             console.error("去AI味处理失败:", error)
@@ -986,6 +1018,7 @@ export function PreviewPanel() {
   const handleDeAiApply = useCallback(() => {
     setDeAiPreviewOpen(false)
     setDeAiSkillName("")
+    setDeAiModelName("")
     handleSave(replaceWholeChapterBody(fileContent, deAiCandidateContent))
   }, [deAiCandidateContent, fileContent, handleSave])
 
@@ -1010,6 +1043,7 @@ export function PreviewPanel() {
   const handleDeAiClose = useCallback(() => {
     setDeAiPreviewOpen(false)
     setDeAiSkillName("")
+    setDeAiModelName("")
   }, [])
 
   const runSelectionTransform = useCallback(async (
@@ -1033,9 +1067,11 @@ export function PreviewPanel() {
 
     const actionFile = selectedFileRef.current
     const actionLabel = action === "polish" ? "AI润色" : "去AI味"
+    const modelLabel = formatResolvedModelLabel(llmConfig, state.providerConfigs)
     setSelectionTransformSkillName(action === "de-ai" ? skillName ?? "" : "")
+    setSelectionTransformModelName(action === "de-ai" ? modelLabel : "")
     const transformStatus = action === "de-ai" && skillName
-      ? `${actionLabel}处理中，使用 Skill：${skillName}...`
+      ? `${actionLabel}处理中，使用 Skill：${skillName}，模型：${modelLabel}...`
       : `${actionLabel}处理中...`
     setSaveStatus(action === "de-ai" ? formatDeAiStatus(transformStatus) : transformStatus)
 
@@ -1352,7 +1388,11 @@ export function PreviewPanel() {
                       disabled={isOutlineIngesting}
                       className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {isOutlineIngesting ? t("novel.outlineGenerator.ingesting") : outlineIngested ? "已提取记忆" : t("novel.outlineGenerator.ingest")}
+                      {isOutlineIngesting
+                        ? t("novel.outlineGenerator.ingesting")
+                        : outlineIngested
+                          ? t("novel.outlineGenerator.reingestButton")
+                          : t("novel.outlineGenerator.ingest")}
                     </button>
                   ) : null}
                   {canIngestOutline && outlineIngested && outlineSnapshotNumber !== null ? (
@@ -1456,9 +1496,13 @@ export function PreviewPanel() {
                   ? "border-emerald-500/50 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
                   : "border-border text-foreground hover:bg-accent"
               }`}
-              title={outlineIngested ? "重新提取初始记忆（将覆盖上次提取的内容）" : t("novel.outlineGenerator.ingest")}
+              title={outlineIngested ? t("novel.outlineGenerator.reingestTitle") : t("novel.outlineGenerator.ingest")}
             >
-              {isOutlineIngesting ? t("novel.outlineGenerator.ingesting") : outlineIngested ? "✓ 已提取记忆" : t("novel.outlineGenerator.ingest")}
+              {isOutlineIngesting
+                ? t("novel.outlineGenerator.ingesting")
+                : outlineIngested
+                  ? t("novel.outlineGenerator.reingestButton")
+                  : t("novel.outlineGenerator.ingest")}
             </button>
           ) : null}
           {!chapterToolbarCompact && canIngestOutline && outlineIngested && outlineSnapshotNumber !== null ? (
@@ -1622,6 +1666,7 @@ export function PreviewPanel() {
         sourceContent={deAiSourceContent}
         candidateContent={deAiCandidateContent}
         skillName={deAiSkillName}
+        modelName={deAiModelName}
         onApply={handleDeAiApply}
         onSaveDraft={() => void handleDeAiSaveDraft()}
         onClose={handleDeAiClose}
@@ -1630,7 +1675,7 @@ export function PreviewPanel() {
         open={selectionTransformOpen}
         title={selectionTransformAction === "polish" ? "AI润色预览" : "去AI味预览"}
         description={selectionTransformAction === "de-ai" && selectionTransformSkillName
-          ? `本次使用 Skill：${selectionTransformSkillName}。确认后会替换当前选中的正文片段。`
+          ? `本次使用 Skill：${selectionTransformSkillName}${selectionTransformModelName ? `，模型：${selectionTransformModelName}` : ""}。确认后会替换当前选中的正文片段。`
           : "确认后会替换当前选中的正文片段。"}
         sourceLabel="原文片段"
         candidateLabel={selectionTransformAction === "polish" ? "润色结果" : "去AI味结果"}
