@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI大纲会话窗口交互重构设计 — 意图分析与渐进式阶段展示</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface-2: #232733;
+    --border: #2d3142;
+    --text: #e6e8ed;
+    --text-muted: #9aa0ae;
+    --accent: #6cb6ff;
+    --accent-2: #8b7bf0;
+    --success: #4ade80;
+    --warning: #fbbf24;
+    --danger: #f87171;
+    --amber: #f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    line-height: 1.7;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+  h2 { font-size: 1.4rem; margin-top: 2.5rem; margin-bottom: 1rem; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+  h3 { font-size: 1.15rem; margin-top: 1.8rem; margin-bottom: 0.8rem; color: var(--accent-2); }
+  h4 { font-size: 1rem; margin-top: 1.2rem; margin-bottom: 0.5rem; color: var(--text); }
+  p { margin-bottom: 0.8rem; }
+  ul, ol { margin-left: 1.5rem; margin-bottom: 0.8rem; }
+  li { margin-bottom: 0.3rem; }
+  code {
+    background: var(--surface-2);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    font-size: 0.88em;
+    color: var(--amber);
+  }
+  pre {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+  pre code { background: none; padding: 0; color: var(--text); }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th, td { border: 1px solid var(--border); padding: 0.6rem 0.8rem; text-align: left; }
+  th { background: var(--surface-2); color: var(--accent); font-weight: 600; }
+  tr:nth-child(even) { background: var(--surface); }
+  .meta { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .callout { background: var(--surface); border-left: 3px solid var(--accent); padding: 0.8rem 1rem; border-radius: 0 6px 6px 0; margin: 1rem 0; }
+  .callout-warn { border-left-color: var(--warning); }
+  .callout-danger { border-left-color: var(--danger); }
+  .callout-success { border-left-color: var(--success); }
+  .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+  .badge-new { background: rgba(74,222,128,0.15); color: var(--success); }
+  .badge-mod { background: rgba(251,191,36,0.15); color: var(--warning); }
+  .badge-keep { background: rgba(107,182,255,0.15); color: var(--accent); }
+  .badge-ban { background: rgba(248,113,113,0.15); color: var(--danger); }
+</style>
+</head>
+<body>
+
+<h1>AI大纲会话窗口交互重构设计</h1>
+<p class="meta">
+  主题：意图分析与渐进式阶段展示<br>
+  日期：2026-07-09<br>
+  方案：方案 B — 显式意图闸门阶段 + 独立阶段状态机
+</p>
+
+<h2 id="background">背景与问题</h2>
+
+<h3>现有实现的三个核心问题</h3>
+
+<ol>
+  <li><strong>直接生成，缺少意图分析</strong>：用户点击「章节细纲」等模块按钮后，<code>handleGenerateSection</code> 直接构造生成 prompt 发送给 Agent，没有「用户到底要生成哪些章节的细纲」这一意图分析步骤。任务理解完全交给 LLM 在 prompt 文字中自行完成。</li>
+  <li><strong>思考过程展示简陋</strong>：大纲面板使用 <code>OutlineThinkingBlock</code> 显示原始流式文本块，没有阶段划分。固定 6 阶段面板 <code>AgentWorkflowPanel</code> 未接入大纲面板，且是预先全部显示而非渐进式出现。</li>
+  <li><strong>流程无连贯性与推荐</strong>：无阶段间数据传递机制；生成完成后无「下一步推荐」，用户需自行决定后续操作。</li>
+</ol>
+
+<h3>设计目标</h3>
+
+<ul>
+  <li>点击模块按钮后先做意图清晰度分析，明确时全自动推进，不明确时智能推荐选项供用户选择</li>
+  <li>思考阶段改为事件驱动渐进式出现，未激活阶段不显示，已完成阶段折叠为摘要</li>
+  <li>生成阶段间自动推进、数据有效流转，AI 自动选择技能并提取资源</li>
+  <li>一章一个独立文件，生成完成后推荐下一步（仅限大纲体系内，严禁推荐正文生成）</li>
+</ul>
+
+<h2 id="architecture">架构总览</h2>
+
+<h3>分层结构</h3>
+
+<pre><code>用户点击模块按钮
+    ↓
+┌─────────────────────────────────────────┐
+│  ① 意图清晰度分析层（新增）              │
+│  - AI 读取已有大纲/章节/设定资料          │
+│  - 输出 intent_clarity 结构化结果         │
+│  - needs_input → AI 提供推荐选项          │
+│  - clear → 自动进入生成流程               │
+└─────────────────────────────────────────┘
+    ↓ (clear 或用户选择后)
+┌─────────────────────────────────────────┐
+│  ② 渐进式生成阶段（改造）                │
+│  - 7 阶段按事件驱动出现                   │
+│  - 技能选择 → 上下文准备 → 工具调用       │
+│    → 思考与角色 → 生成与校验              │
+│  - 已完成折叠摘要，当前阶段展开           │
+└─────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────┐
+│  ③ 结果输出 + 下一步推荐（新增）          │
+│  - 每章/每项一个独立文件                  │
+│  - 批量保存确认（支持部分取消）           │
+│  - 推荐下一步（仅限大纲体系内）           │
+└─────────────────────────────────────────┘</code></pre>
+
+<h3>关键设计决策</h3>
+
+<div class="callout">
+  <strong>1. 不改动共享文件</strong>：<code>workflow-trace.ts</code> 和 <code>agent-workflow-panel.tsx</code> 被 AI 会话面板共用，改动会影响其他功能。所有新逻辑在 outline 专属文件中实现。
+</div>
+
+<div class="callout">
+  <strong>2. 意图清晰度通过结构化输出强制</strong>：AI 必须先输出 <code>intent_clarity</code> 结构化 JSON，前端解析后决定是否暂停等待用户输入。不靠 AI 自觉，与项目教训一致。
+</div>
+
+<div class="callout">
+  <strong>3. 复用现有 Agent 循环</strong>：仍走 <code>AgentRunner.run</code>，工具注册不变（route_task / apply_skill / read_outline / read_chapter / write_outline_node 等），在外围增加意图分析层和渐进式渲染层。
+</div>
+
+<h2 id="intent">意图清晰度分析层</h2>
+
+<h3>触发时机</h3>
+
+<p>用户点击「章节细纲」等模块按钮时，不再直接构造生成 prompt，而是构造<strong>意图分析 prompt</strong>，让 AI 先做意图清晰度判断。</p>
+
+<h3>意图清晰度判定规则</h3>
+
+<p>AI 读取已有资料后，根据模块类型判断意图清晰度：</p>
+
+<table>
+  <tr><th>模块类型</th><th>判定依据</th><th>needs_input 触发条件</th></tr>
+  <tr><td>章节细纲</td><td>已有章节列表 vs 已有细纲文件</td><td>完全没有章节 / 大范围缺细纲需用户缩小范围</td></tr>
+  <tr><td>人物小传</td><td>已有角色列表 vs 已有小传文件</td><td>角色来源不明确（总纲提及但未细化）</td></tr>
+  <tr><td>组织势力</td><td>当前卷涉及的势力 vs 已有势力设定</td><td>卷范围不明确</td></tr>
+  <tr><td>力量体系</td><td>总纲中的体系设定 vs 已有文件</td><td>体系框架未在总纲中定义</td></tr>
+  <tr><td>其他模块</td><td>类似策略</td><td>信息不足时</td></tr>
+</table>
+
+<h3>意图分析输出格式</h3>
+
+<p>AI 输出需包裹在 <code>&lt;!-- intent_clarity --&gt;</code> 标记中：</p>
+
+<pre><code>&lt;!-- intent_clarity --&gt;
+{
+  "clarity": "clear" | "needs_input",
+  "module": "章节细纲",
+  "analysis": "检测到共有35章，其中0章有细纲",
+  "detectedScope": "clear时填写范围描述",
+  "options": [
+    {"id":"A","label":"生成前面缺失的细纲","description":"为第1-35章逐一生成细纲"},
+    {"id":"B","label":"根据已有章节内容分析后生成后续细纲","description":"读取现有正文，推断后续章节走向并生成细纲"},
+    {"id":"C","label":"生成最近5-10章的细纲","description":"为第26-35章生成细纲"},
+    {"id":"D","label":"自定义","description":"由你描述要生成的内容范围或故事方向"}
+  ],
+  "question": "needs_input时的自然语言提问，clear时为空"
+}
+&lt;!-- /intent_clarity --&gt;</code></pre>
+
+<div class="callout callout-warn">
+  <strong>输出约束</strong>：<code>clear</code> 时只输出上述 JSON，不生成正文。<code>needs_input</code> 时输出 JSON 后用自然语言在会话中提出澄清问题 + 推荐选项。
+</div>
+
+<h3>前端解析与控制流</h3>
+
+<pre><code>handleGenerateSection(title, requestHint)
+  → handleSend(意图分析prompt, { phase: "intent_analysis" })
+  → Agent 执行（调用 list/read 工具收集信息）
+  → AI 输出 intent_clarity JSON
+  → 流结束后，parseIntentClarity(lastMessage.content)
+      → clear:  自动 handleSend(生成prompt, { phase: "generation", scope: result })
+      → needs_input: 渲染 AI 的自然语言提问 + 推荐选项到会话
+                     设置消息状态为 waiting_user_input
+                     用户点选选项或自由输入
+                     → handleSend(用户选择/回复, { phase: "generation", scope: 上次result })
+                     → 直接注入生成，不再二次分析</code></pre>
+
+<div class="callout callout-danger">
+  <strong>防无限循环</strong>：用户回复后直接注入生成 prompt，不再做二次意图分析。避免 AI-用户-AI 的无限循环。
+</div>
+
+<h3>智能推荐选项策略</h3>
+
+<p>当意图不明确（needs_input）时，AI 根据分析结果提供 4 类推荐选项：</p>
+
+<ol>
+  <li><strong>全部缺失项生成</strong>：如「生成前面缺失的细纲」</li>
+  <li><strong>基于已有内容推断</strong>：如「根据已有章节内容分析后生成后续细纲」</li>
+  <li><strong>最近范围生成</strong>：如「生成最近 5-10 章的细纲」</li>
+  <li><strong>自定义</strong>：用户自行描述要生成的内容范围或故事方向</li>
+</ol>
+
+<h3>状态机扩展</h3>
+
+<p>在 <code>outline-workflow-state.ts</code> 新增 <code>intent_analysis</code> 和 <code>waiting_user_input</code> 阶段：</p>
+
+<pre><code>idle → intent_analysis → sufficiency_check           (clear)
+                        → waiting_user_input → sufficiency_check  (用户回复后)</code></pre>
+
+<h2 id="stages">渐进式思考阶段展示</h2>
+
+<h3>现状问题</h3>
+
+<p>大纲面板用 <code>OutlineThinkingBlock</code> 显示原始流式文本块，无阶段划分。固定 6 阶段面板 <code>AgentWorkflowPanel</code> 未接入大纲面板。</p>
+
+<h3>新组件：OutlineWorkflowStages</h3>
+
+<p>在 outline 场景内新建独立组件，不改动共享文件。</p>
+
+<pre><code>┌─ 思考过程 ─────────────────────────────┐
+│  ✓ 任务理解 · 识别为生成大纲意图 · 1.2s │ ← 折叠摘要，点击展开
+│  ✓ 范围分析 · 检测到3章缺失细纲 · 0.8s │ ← 折叠摘要
+│  ▶ 技能选择 · 正在选择写作技能...      │ ← 当前阶段，展开显示
+│     └ 大纲生成技能已加载               │
+│                                        │
+│  （后续阶段尚未出现，不显示）           │
+└────────────────────────────────────────┘</code></pre>
+
+<h3>阶段定义（7 个阶段）</h3>
+
+<table>
+  <tr><th>序号</th><th>阶段</th><th>激活条件</th><th>完成条件</th><th>数据来源</th></tr>
+  <tr><td>1</td><td>任务理解</td><td>检测到 route_task 调用</td><td>route_task 返回结果</td><td>agentToolCalls 中的 route_task</td></tr>
+  <tr><td>2</td><td>范围分析</td><td>检测到 intent_clarity 输出</td><td>intent_clarity 解析完成</td><td>content 中的 intent_clarity 块</td></tr>
+  <tr><td>3</td><td>技能选择</td><td>检测到 apply_skill 调用</td><td>apply_skill 返回结果</td><td>agentToolCalls 中的 apply_skill</td></tr>
+  <tr><td>4</td><td>上下文准备</td><td>检测到 list/read 工具调用</td><td>所有 read 调用完成</td><td>agentToolCalls 中的 list_*/read_*</td></tr>
+  <tr><td>5</td><td>工具调用</td><td>检测到 write/其他工具调用</td><td>工具调用完成</td><td>agentToolCalls 中的 write_*/其他</td></tr>
+  <tr><td>6</td><td>思考与角色</td><td>检测到 thinking 块</td><td>流式 thinking 结束</td><td>separateThinking(content).thinking</td></tr>
+  <tr><td>7</td><td>生成与校验</td><td>检测到正文输出开始</td><td>质量检查完成</td><td>separateThinking(content).answer + outlineSaveRequest</td></tr>
+</table>
+
+<h3>渐进式出现机制</h3>
+
+<div class="callout">
+  <strong>核心原则</strong>：只有 status 不为 <code>hidden</code> 的阶段才渲染。阶段初始全部为 hidden，当检测到对应事件时变为 active，下一阶段出现时当前阶段变为 done 并折叠。
+</div>
+
+<pre><code>type StageRenderStatus = "hidden" | "active" | "done"
+
+// 阶段初始全部为 hidden
+// 检测到对应事件 → 该阶段变为 active
+// 下一阶段出现 → 当前阶段变为 done 并折叠
+const stages = buildOutlineStages(agentEvents)
+const visibleStages = stages.filter(s => s.status !== "hidden")</code></pre>
+
+<h3>折叠/展开行为</h3>
+
+<ul>
+  <li><strong>默认行为</strong>：<code>done</code> 阶段折叠为单行摘要，<code>active</code> 阶段展开显示完整内容</li>
+  <li><strong>用户操作</strong>：点击任意阶段行可手动 toggle 展开/折叠</li>
+  <li><strong>过渡动画</strong>：新阶段出现时 <code>opacity 0→1</code> + <code>translateY(4px→0)</code>，250ms ease-out</li>
+</ul>
+
+<h3>已完成阶段摘要格式</h3>
+
+<pre><code>✓ 任务理解 · {意图标签}（置信度{百分比}） · {耗时}
+✓ 范围分析 · {分析摘要} · {耗时}
+✓ 技能选择 · {技能名} · {耗时}
+✓ 上下文准备 · 读取了{N}个文件 · {耗时}
+✓ 工具调用 · 调用了{N}个工具 · {耗时}
+✓ 思考与角色 · {思考摘要} · {耗时}
+✓ 生成与校验 · 生成{N}个文件 · {耗时}</code></pre>
+
+<h2 id="output">文件输出结构与下一步推荐</h2>
+
+<h3>每章/每项一个独立文件</h3>
+
+<h4>目录结构</h4>
+
+<pre><code>wiki/outlines/
+├── 章节细纲/
+│   ├── 第1章-章节标题.md
+│   ├── 第2章-章节标题.md
+│   └── 第3章-章节标题.md
+├── 人物小传/
+│   ├── 主角名.md
+│   └── 配角名.md
+├── 组织势力设定/
+│   └── 势力名称.md
+├── 力量体系/
+│   └── 体系名称.md
+└── ...</code></pre>
+
+<h4>细纲文件内容模板</h4>
+
+<pre><code># 第N章 章节标题
+
+## 章节目标
+（本章要达成的叙事目标）
+
+## 核心事件
+1. ...
+2. ...
+
+## 主要冲突
+（本章的核心矛盾）
+
+## 关键转折
+（改变走向的关键节点）
+
+## 结尾钩子
+（章末悬念）
+
+## 与前后章节承接
+- 承接前文：...
+- 为后文铺垫：...</code></pre>
+
+<h4>输出模式配置</h4>
+
+<p>在 <code>outline-section-configs.ts</code> 新增 <code>outputMode</code> 字段：</p>
+
+<table>
+  <tr><th>模式</th><th>适用模块</th><th>行为</th></tr>
+  <tr><td><code>per_chapter</code></td><td>章节细纲</td><td>每个章节生成独立文件</td></tr>
+  <tr><td><code>per_item</code></td><td>人物小传、组织势力、力量体系等</td><td>每个角色/势力/体系生成独立文件</td></tr>
+  <tr><td><code>single</code></td><td>不需要拆分的场景（兼容保留）</td><td>单文件输出</td></tr>
+</table>
+
+<h4>批量 outlineSaveRequest</h4>
+
+<p>AI 在输出末尾附带多个 <code>outlineSaveRequest</code> JSON，每个对应一个文件：</p>
+
+<pre><code>[
+  {"type":"outline","path":"wiki/outlines/章节细纲/第1章-初入江湖.md","content":"..."},
+  {"type":"outline","path":"wiki/outlines/章节细纲/第2章-暗流涌动.md","content":"..."},
+  {"type":"outline","path":"wiki/outlines/章节细纲/第3章-危机四伏.md","content":"..."}
+]</code></pre>
+
+<h4>批量保存确认</h4>
+
+<p>改造 <code>OutlineSaveConfirmDialog</code> 支持批量文件列表展示：</p>
+
+<pre><code>即将保存以下3个文件：
+☑ 第1章-初入江湖.md
+☑ 第2章-暗流涌动.md
+☑ 第3章-危机四伏.md
+[全部保存] [取消]</code></pre>
+
+<div class="callout callout-success">
+  <strong>支持部分取消</strong>：用户可取消勾选其中部分文件，只保存勾选的文件。
+</div>
+
+<h3>下一步推荐机制</h3>
+
+<p>生成结果输出后，AI 额外输出 <code>next_step</code> 结构：</p>
+
+<pre><code>&lt;!-- next_step --&gt;
+{
+  "completedModule": "章节细纲",
+  "completedScope": "第1-5章细纲",
+  "recommendations": [
+    {"id":"A","label":"完善人物小传","reason":"章节细纲中提及3个未立传的角色"},
+    {"id":"B","label":"生成组织势力设定","reason":"第2-3章涉及新势力但未设定"},
+    {"id":"C","label":"生成伏笔计划","reason":"章纲中埋设了2处伏笔需规划"},
+    {"id":"D","label":"自定义","reason":"由你描述下一步想做的事"}
+  ]
+}
+&lt;!-- /next_step --&gt;</code></pre>
+
+<p>前端渲染为可点击的推荐卡片，位于生成结果下方：</p>
+
+<pre><code>┌─ 生成完成 · 已保存3个文件 ──────────────┐
+│  ✓ 第1章-初入江湖.md                   │
+│  ✓ 第2章-暗流涌动.md                   │
+│  ✓ 第3章-危机四伏.md                   │
+├─ 接下来想做什么？ ──────────────────────┤
+│  [A] 完善人物小传         →            │
+│  [B] 生成组织势力设定     →            │
+│  [C] 生成伏笔计划         →            │
+│  [D] 自定义               →            │
+└────────────────────────────────────────┘</code></pre>
+
+<div class="callout callout-danger">
+  <strong>严禁推荐正文生成</strong>：AI 大纲面板禁止生成正文，推荐中严禁出现「生成对应章节正文」类选项。所有推荐仅限大纲体系内流转。
+</div>
+
+<h4>推荐策略表（仅限大纲体系内）</h4>
+
+<table>
+  <tr><th>完成模块</th><th>推荐方向</th></tr>
+  <tr><td>章节细纲</td><td>人物小传（涉及未立传角色）/ 组织势力设定（涉及新势力）/ 伏笔计划（埋设伏笔）</td></tr>
+  <tr><td>人物小传</td><td>组织势力设定（角色所属势力）/ 力量体系（角色能力归属）</td></tr>
+  <tr><td>组织势力</td><td>力量体系（势力能力层次）/ 地理设定（势力分布区域）</td></tr>
+  <tr><td>力量体系</td><td>人物小传（能力归属角色）/ 背景设定（体系运转规则）</td></tr>
+  <tr><td>伏笔计划</td><td>章节细纲（伏笔融入章节）/ 人物小传（伏笔相关角色）</td></tr>
+</table>
+
+<p>推荐内容由 AI 根据实际生成内容动态推断，读取刚生成的文件内容，分析其中提及但尚未建立的关联项，给出针对性推荐。用户点击推荐后自动构造对应模块的生成 prompt 并发送；选择「自定义」时聚焦输入框等待用户输入。</p>
+
+<h2 id="files">涉及文件与改动范围</h2>
+
+<h3>新增文件</h3>
+
+<table>
+  <tr><th>文件</th><th>职责</th><th>状态</th></tr>
+  <tr><td><code>src/lib/novel/outline-intent-clarity.ts</code></td><td>意图清晰度分析：prompt 构造、结果解析、IntentClarityResult 类型定义</td><td><span class="badge badge-new">新增</span></td></tr>
+  <tr><td><code>src/lib/novel/outline-stage-trace.ts</code></td><td>大纲专属阶段追踪：基于 Agent 事件构建渐进式阶段列表（7阶段），独立于共享的 workflow-trace.ts</td><td><span class="badge badge-new">新增</span></td></tr>
+  <tr><td><code>src/components/sources/outline-workflow-stages.tsx</code></td><td>渐进式阶段渲染组件：hidden/active/done 状态管理、折叠摘要、展开详情、过渡动画</td><td><span class="badge badge-new">新增</span></td></tr>
+  <tr><td><code>src/lib/novel/outline-next-step.ts</code></td><td>下一步推荐：prompt 构造、NextStepRecommendation 解析、推荐策略约束（禁止正文）</td><td><span class="badge badge-new">新增</span></td></tr>
+</table>
+
+<h3>修改文件</h3>
+
+<table>
+  <tr><th>文件</th><th>改动内容</th><th>风险</th><th>状态</th></tr>
+  <tr><td><code>outline-chat-panel.tsx</code></td><td>改造 handleGenerateSection 为两阶段流程；替换 OutlineThinkingBlock 为 OutlineWorkflowStages；新增意图解析和下一步推荐渲染</td><td>高（核心面板）</td><td><span class="badge badge-mod">修改</span></td></tr>
+  <tr><td><code>outline-section-configs.ts</code></td><td>新增 outputMode 字段（per_chapter / per_item / single）</td><td>低（纯配置）</td><td><span class="badge badge-mod">修改</span></td></tr>
+  <tr><td><code>outline-workflow-state.ts</code></td><td>新增 intent_analysis 和 waiting_user_input 阶段及转移规则</td><td>低（纯类型扩展）</td><td><span class="badge badge-mod">修改</span></td></tr>
+  <tr><td><code>outline-save-confirm-dialog.tsx</code></td><td>支持批量文件列表展示、部分取消</td><td>中（需处理多文件选择）</td><td><span class="badge badge-mod">修改</span></td></tr>
+  <tr><td><code>outline-chat-store.ts</code></td><td>消息类型新增 intentPhase / nextStepRecommendation 字段</td><td>低（类型扩展）</td><td><span class="badge badge-mod">修改</span></td></tr>
+</table>
+
+<h3>不修改的文件（保护边界）</h3>
+
+<table>
+  <tr><th>文件</th><th>原因</th><th>状态</th></tr>
+  <tr><td><code>workflow-trace.ts</code></td><td>AI 会话面板共用，改动影响其他功能</td><td><span class="badge badge-ban">不修改</span></td></tr>
+  <tr><td><code>agent-workflow-panel.tsx</code></td><td>AI 会话面板共用</td><td><span class="badge badge-ban">不修改</span></td></tr>
+  <tr><td><code>chat-panel.tsx</code></td><td>AI 会话面板，不涉及</td><td><span class="badge badge-ban">不修改</span></td></tr>
+  <tr><td><code>plan-execute-policy.ts</code></td><td>章节写作协议，不涉及大纲场景</td><td><span class="badge badge-ban">不修改</span></td></tr>
+  <tr><td><code>task-router.ts</code></td><td>意图路由不变，仍用现有 route_task</td><td><span class="badge badge-ban">不修改</span></td></tr>
+</table>
+
+<h3>提示词改动位置</h3>
+
+<table>
+  <tr><th>位置</th><th>改动</th></tr>
+  <tr><td><code>buildOutlineSectionGenerationPrompt</code> (L336)</td><td>拆分为 <code>buildIntentAnalysisPrompt</code> + <code>buildGenerationPrompt</code>（原函数改造）</td></tr>
+  <tr><td><code>buildOutlineAgentSystemPrompt</code> (L253)</td><td>新增意图分析阶段约束和 intent_clarity 输出格式要求</td></tr>
+  <tr><td>生成 prompt 末尾</td><td>新增 next_step 输出格式要求</td></tr>
+</table>
+
+<h2 id="constraints">关键约束汇总</h2>
+
+<div class="callout callout-danger">
+  <ol>
+    <li><strong>AI 大纲面板严禁生成正文</strong>，推荐中严禁推荐「生成对应章节正文」</li>
+    <li><strong>用户回复后直接注入生成</strong>，不再二次意图分析，避免无限循环</li>
+    <li><strong>批量保存支持部分取消</strong>，用户可取消勾选其中部分文件</li>
+    <li><strong>不改动共享文件</strong>（workflow-trace.ts / agent-workflow-panel.tsx / chat-panel.tsx / plan-execute-policy.ts / task-router.ts）</li>
+    <li><strong>意图清晰度通过结构化输出强制</strong>，不靠 AI 自觉</li>
+    <li><strong>阶段渐进式出现</strong>，未激活阶段不显示，已完成折叠为摘要</li>
+  </ol>
+</div>
+
+<h2 id="testing">测试与验证要求</h2>
+
+<ol>
+  <li><strong>意图分析测试</strong>：点击章节细纲，验证 AI 是否输出 intent_clarity JSON，前端是否正确解析 clear / needs_input</li>
+  <li><strong>渐进式阶段测试</strong>：验证 7 个阶段按事件驱动出现，未激活阶段不显示，已完成阶段折叠为摘要</li>
+  <li><strong>文件输出测试</strong>：验证每章/每项生成独立文件，目录结构正确</li>
+  <li><strong>批量保存测试</strong>：验证批量文件列表展示，部分取消功能正常</li>
+  <li><strong>下一步推荐测试</strong>：验证推荐卡片渲染，点击后正确构造对应模块 prompt；验证推荐中不含正文生成选项</li>
+  <li><strong>回归测试</strong>：验证 AI 会话面板的思考过程展示不受影响（workflow-trace / agent-workflow-panel 未被修改）</li>
+  <li><strong>TypeScript 编译检查</strong>：所有新增和修改文件通过 typecheck</li>
+</ol>
+
+</body>
+</html>
