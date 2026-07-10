@@ -47,3 +47,15 @@ QMAI 是**长篇小说记忆型 AI 写作桌面系统**（Tauri 2 + React 19 + T
 - 正式章节保存路径是否仍触发摄取 pipeline？
 - 新增 LLM 调用是否走 `resolveNovelModel()` / `resolveReviewModel()`？
 - UI 改动是否只需调 store，而非复制业务逻辑？
+
+## Cursor Cloud specific instructions
+
+Scope: the primary product is the **QMAI Tauri 2 desktop app** at the repo root (React 19 frontend + Rust backend in `src-tauri/`). `analytics-worker/` (Cloudflare Worker) and `extension/` are independent optional sub-projects and are not part of the default dev setup. Standard dev/build commands live in `README.md` ("本地开发") and root `package.json` scripts.
+
+- **Rust toolchain**: the crate uses `edition2024`, which needs Rust **stable ≥ 1.85**. The base image may ship an older default (1.83) that fails `cargo build` with an `edition2024 is required` error; `rustup default stable` fixes it (the startup update script runs this). Run `cargo build` from inside `src-tauri/`.
+- **System deps** (already provisioned in the env snapshot): `libwebkit2gtk-4.1-dev`, `protobuf-compiler`, `librsvg2-dev`, `libayatana-appindicator3-dev`, `libxdo-dev`, `patchelf`. These are only needed to build/run the Rust side.
+- **PDFium**: `src-tauri/pdfium/libpdfium.so` is a downloaded binary (not in git, provisioned in the snapshot) and is only needed at runtime for the PDF-import feature. If missing, download `pdfium-linux-x64.tgz` from `bblanchon/pdfium-binaries` or point `PDFIUM_DYNAMIC_LIB_PATH` at a `libpdfium.so`. It is not required for `cargo build`.
+- **Running the desktop app**: a VNC desktop is available on `DISPLAY=:1`. Launch with `DISPLAY=:1 WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 npm run tauri dev` so the WebKitGTK webview renders under VNC (the `libEGL … DRI3` software-rendering warnings are harmless). `npm run dev` alone serves the Vite shell on `:1420`, but most features call Tauri IPC and only work inside the actual Tauri window.
+- **Lint/typecheck**: `npm run typecheck` currently fails on a **pre-existing** type error in `src/stores/import-progress-store.ts` (unrelated to the environment). CI verifies the build via `npx vite build` (no typecheck) — use that to confirm the frontend builds.
+- **Tests**: `npm run test:mocks` runs the offline vitest suite (fast). `npm test` / `npm run test:llm` hit a real LLM API over the network and need `.env.test.local` credentials — skip them unless configured.
+- **Project directory gotcha**: the stored `app-state.json` default new-project path is a Windows path (`D:/QM-BOOK/...`); on Linux the backend creates that literally under the process CWD. Always type a real Linux directory (e.g. under `$HOME`) when creating a project.
