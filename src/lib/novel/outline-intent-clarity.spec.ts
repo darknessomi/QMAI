@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { parseIntentClarity } from "./outline-intent-clarity"
+import { parseIntentClarity, stripStructuredMarkers } from "./outline-intent-clarity"
 
 describe("parseIntentClarity", () => {
   it("解析 clear 意图", () => {
@@ -34,5 +34,27 @@ describe("parseIntentClarity", () => {
 {invalid json}
 <!-- /intent_clarity -->`
     expect(parseIntentClarity(text)).toBeNull()
+  })
+})
+
+describe("stripStructuredMarkers", () => {
+  it("移除 intent_clarity 标记块", () => {
+    const text = `分析结果如下：\n<!-- intent_clarity -->\n{"clarity":"clear"}\n<!-- /intent_clarity -->\n\n这是正文内容。`
+    expect(stripStructuredMarkers(text)).toBe("分析结果如下：\n\n这是正文内容。")
+  })
+
+  it("移除 next_step 标记块", () => {
+    const text = `正文内容\n<!-- next_step -->\n{"recommendations":[]}\n<!-- /next_step -->`
+    expect(stripStructuredMarkers(text).trim()).toBe("正文内容")
+  })
+
+  it("同时移除两种标记块", () => {
+    const text = `<!-- intent_clarity -->\n{"clarity":"clear"}\n<!-- /intent_clarity -->\n正文\n<!-- next_step -->\n{"recommendations":[]}\n<!-- /next_step -->`
+    expect(stripStructuredMarkers(text).trim()).toBe("正文")
+  })
+
+  it("无标记块时原样返回", () => {
+    const text = "纯文本内容"
+    expect(stripStructuredMarkers(text)).toBe("纯文本内容")
   })
 })

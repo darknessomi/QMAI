@@ -38,4 +38,24 @@ describe("isRecommendationForbidden", () => {
     expect(isRecommendationForbidden("完善人物小传")).toBe(false)
     expect(isRecommendationForbidden("生成组织势力设定")).toBe(false)
   })
+
+  it("不会误杀大纲相关的生成推荐", () => {
+    expect(isRecommendationForbidden("生成章节细纲")).toBe(false)
+    expect(isRecommendationForbidden("生成人物小传")).toBe(false)
+    expect(isRecommendationForbidden("生成世界观设定")).toBe(false)
+    expect(isRecommendationForbidden("生成伏笔计划")).toBe(false)
+    expect(isRecommendationForbidden("生成地理设定")).toBe(false)
+    expect(isRecommendationForbidden("生成力量体系")).toBe(false)
+    expect(isRecommendationForbidden("生成金手指设定")).toBe(false)
+    expect(isRecommendationForbidden("生成背景设定")).toBe(false)
+    expect(isRecommendationForbidden("生成组织势力")).toBe(false)
+    expect(isRecommendationForbidden("生成地点设定")).toBe(false)
+  })
+
+  it("正确禁止正文生成类推荐", () => {
+    expect(isRecommendationForbidden("生成正文章节")).toBe(true)
+    expect(isRecommendationForbidden("写章节正文")).toBe(true)
+    expect(isRecommendationForbidden("开始写正文")).toBe(true)
+    expect(isRecommendationForbidden("创作正文内容")).toBe(true)
+  })
 })

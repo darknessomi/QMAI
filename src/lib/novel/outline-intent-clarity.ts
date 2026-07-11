@@ -98,3 +98,11 @@ export function buildIntentAnalysisPrompt(title: string, requestHint: string): s
     "needs_input 时：输出 JSON 后，用自然语言在会话中提出澄清问题 + 推荐选项。",
   ].join("\n")
 }
+
+export function stripStructuredMarkers(text: string): string {
+  return text
+    .replace(/<!--\s*intent_clarity\s*-->[\s\S]*?<!--\s*\/intent_clarity\s*-->/gi, "")
+    .replace(/<!--\s*next_step\s*-->[\s\S]*?<!--\s*\/next_step\s*-->/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}

@@ -94,4 +94,72 @@ describe("buildOutlineStages", () => {
     expect(activeStages.length).toBe(0)
     expect(doneStages.length).toBeGreaterThanOrEqual(2)
   })
+
+  it("任务理解阶段摘要包含工具信息", () => {
+    const input: OutlineStageInput = {
+      toolCalls: [makeToolCall("route_task", "done")],
+      content: "",
+      isStreaming: false,
+    }
+    const stages = buildOutlineStages(input)
+    const intentStage = stages.find((s) => s.kind === "intent")
+    expect(intentStage?.summary).toBeTruthy()
+    expect(intentStage?.summary).toContain("route_task")
+  })
+
+  it("范围分析阶段摘要包含模块名", () => {
+    const content = `<!-- intent_clarity -->
+{"clarity":"clear","module":"章节细纲","analysis":"3章缺细纲","detectedScope":"第1-3章","missingItems":[],"options":[],"question":""}
+<!-- /intent_clarity -->`
+    const input: OutlineStageInput = {
+      toolCalls: [makeToolCall("route_task", "done")],
+      content,
+      isStreaming: false,
+    }
+    const stages = buildOutlineStages(input)
+    const scopeStage = stages.find((s) => s.kind === "scope")
+    expect(scopeStage?.summary).toContain("章节细纲")
+  })
+
+  it("上下文准备阶段摘要包含读取文件数", () => {
+    const input: OutlineStageInput = {
+      toolCalls: [
+        makeToolCall("route_task", "done"),
+        makeToolCall("read_outline", "done"),
+        makeToolCall("read_chapter", "done"),
+        makeToolCall("list_outlines", "done"),
+      ],
+      content: "",
+      isStreaming: false,
+    }
+    const stages = buildOutlineStages(input)
+    const ctxStage = stages.find((s) => s.kind === "context")
+    expect(ctxStage?.summary).toContain("3")
+  })
+
+  it("闭合 thinking 标签提取 thinkingContent 且不标记 streaming", () => {
+    const input: OutlineStageInput = {
+      toolCalls: [],
+      content: "<thinking>正在分析角色动机...</thinking>",
+      isStreaming: true,
+    }
+    const stages = buildOutlineStages(input)
+    const thinkingStage = stages.find((s) => s.kind === "thinking")
+    expect(thinkingStage?.thinkingContent).toBe("正在分析角色动机...")
+    expect(thinkingStage?.thinkingStreaming).toBeFalsy()
+    expect(thinkingStage?.status).toBe("active")
+  })
+
+  it("流式未闭合 thinking 标签提取 thinkingContent 并标记 streaming", () => {
+    const input: OutlineStageInput = {
+      toolCalls: [],
+      content: "<thinking>正在分析角色动机...",
+      isStreaming: true,
+    }
+    const stages = buildOutlineStages(input)
+    const thinkingStage = stages.find((s) => s.kind === "thinking")
+    expect(thinkingStage?.thinkingContent).toBe("正在分析角色动机...")
+    expect(thinkingStage?.thinkingStreaming).toBe(true)
+    expect(thinkingStage?.status).toBe("active")
+  })
 })
