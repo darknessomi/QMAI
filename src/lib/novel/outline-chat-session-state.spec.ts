@@ -12,6 +12,11 @@ describe("AI 大纲多会话副作用隔离", () => {
     expect(canApplyOutlineRunEffect(states, "a", "new")).toBe(true)
   })
 
+  it("停止后晚到回调不能覆盖最终状态", () => {
+    const stoppedStates = { a: { status: "idle" as const, updatedAt: 3 } }
+    expect(canApplyOutlineRunEffect(stoppedStates, "a", "stopped-run")).toBe(false)
+  })
+
   it("后台 follow-up 不清除用户当前 B 会话草稿", () => {
     expect(shouldClearOutlineDraft({ clearDraft: true, invocationConversationId: "a", activeConversationId: "b" })).toBe(false)
     expect(shouldClearOutlineDraft({ clearDraft: false, invocationConversationId: "b", activeConversationId: "b" })).toBe(false)

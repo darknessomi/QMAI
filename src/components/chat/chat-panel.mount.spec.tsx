@@ -135,7 +135,12 @@ describe("ChatPanel mount 基础设施", () => {
       },
     })
 
-    expect(view.container.querySelector('[aria-label="正在生成"]')).not.toBeNull()
+    const statusIcon = view.container.querySelector('[aria-label="正在生成"]')
+    expect(statusIcon).not.toBeNull()
+    expect(statusIcon?.querySelector("svg")).not.toBeNull()
+    expect(statusIcon?.hasAttribute("data-slot")).toBe(false)
+    expect(view.container.textContent).not.toContain("正在生成")
+    expect(document.body.querySelector('[data-slot="tooltip-content"]')).toBeNull()
     await view.unmount()
   })
 

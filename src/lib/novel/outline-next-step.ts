@@ -98,7 +98,6 @@ export function cleanNextStepArtifacts(text: string): string {
   const start = cleaned.search(START_PATTERN)
   if (start >= 0) cleaned = cleaned.slice(0, start)
   cleaned = cleaned.replace(END_PATTERN, "").replace(NAKED_MARKER_PATTERN, "")
-  cleaned = cleaned.replace(/```(?:json)?\s*$/i, "")
   return cleaned.trim()
 }
 

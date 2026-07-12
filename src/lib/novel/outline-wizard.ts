@@ -27,6 +27,8 @@ export interface OutlineWizardGenreOption {
   label: string
 }
 
+export type OutlineWizardExplicitField = "task" | "length" | "channel" | "genre" | "customGenre" | "inspiration" | "sellingPoints" | "targets" | "scale" | "narrative" | "materialSource"
+
 export interface OutlineWizardRequest {
   task: OutlineWizardTask
   length: OutlineWizardLength
@@ -39,6 +41,7 @@ export interface OutlineWizardRequest {
   scale: string
   narrative: OutlineWizardNarrative
   materialSource: OutlineWizardMaterialSource
+  explicit?: Partial<Record<OutlineWizardExplicitField, boolean>>
 }
 
 export const OUTLINE_WIZARD_TASK_OPTIONS: OutlineWizardOption<OutlineWizardTask>[] = [

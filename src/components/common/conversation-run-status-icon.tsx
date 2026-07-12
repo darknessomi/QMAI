@@ -28,6 +28,19 @@ export function ConversationRunStatusIcon({ state }: { state?: ConversationRunSt
         ? "text-red-500"
         : "text-amber-500"
 
+  if (state.status === "running") {
+    return (
+      <span
+        role="img"
+        aria-label={label}
+        data-conversation-run-status={state.status}
+        className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center"
+      >
+        <Icon aria-hidden="true" className={`h-3.5 w-3.5 ${color} animate-spin`} />
+      </span>
+    )
+  }
+
   return (
     <TooltipProvider delay={200}>
       <Tooltip>
@@ -41,7 +54,7 @@ export function ConversationRunStatusIcon({ state }: { state?: ConversationRunSt
             />
           }
         >
-          <Icon aria-hidden="true" className={`h-3.5 w-3.5 ${color} ${state.status === "running" ? "animate-spin" : ""}`} />
+          <Icon aria-hidden="true" className={`h-3.5 w-3.5 ${color}`} />
           {state.status === "completed_unread" ? (
             <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full border border-background bg-sky-500" />
           ) : null}

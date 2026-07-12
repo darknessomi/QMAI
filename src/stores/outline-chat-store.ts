@@ -6,6 +6,7 @@ import type { ReferenceToken } from "@/lib/reference/types"
 import { useWikiStore } from "@/stores/wiki-store"
 import type { IntentClarityResult } from "@/lib/novel/outline-intent-clarity"
 import type { NextStepRecommendation } from "@/lib/novel/outline-next-step"
+import { isNovelGenerationRequestPackage, type NovelGenerationRequestPackage } from "@/lib/novel/novel-generation-request-package"
 import {
   canStartConversationRun as canStartRun,
   failConversationRun as createFailedRunState,
@@ -79,6 +80,7 @@ export interface OutlineChatMessage {
   intentPhase?: "intent_analysis" | "generation" | "waiting_user_input"
   intentClarityResult?: IntentClarityResult | null
   nextStepRecommendation?: NextStepRecommendation | null
+  novelGenerationRequest?: NovelGenerationRequestPackage
 }
 
 export interface OutlineChatConversation {
@@ -364,6 +366,12 @@ export const useOutlineChatStore = create<OutlineChatState>((set, get) => {
       const conversations = (data.conversations ?? []).map((conversation) => ({
         ...conversation,
         updatedAt: conversation.updatedAt ?? conversation.createdAt ?? Date.now(),
+        messages: conversation.messages.map((message) => ({
+          ...message,
+          novelGenerationRequest: isNovelGenerationRequestPackage(message.novelGenerationRequest)
+            ? message.novelGenerationRequest
+            : undefined,
+        })),
       }))
       const conversationIds = new Set(conversations.map((conversation) => conversation.id))
       const runStates = Object.fromEntries(

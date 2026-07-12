@@ -572,6 +572,9 @@ interface WikiState {
   refreshGraph: (() => void) | null
   llmConfig: LlmConfig
   aiChatModel: string
+  /** Dedicated global AI outline model key; isolated from AI chat. */
+  aiOutlineModel: string
+  aiOutlineModelRevision: number
   /** 默认模型（工作流）：拆文库、导入队列、去重、角色 aura 等。章节/大纲记忆摄取见 novelConfig.extractModel */
   defaultLlmModel: string
   /** Per-provider-preset stored overrides (API key, model, endpoint, …). */
@@ -647,6 +650,7 @@ interface WikiState {
   setRefreshGraph: (refreshGraph: (() => void) | null) => void
   setLlmConfig: (config: LlmConfig) => void
   setAiChatModel: (model: string) => void
+  setAiOutlineModel: (model: string) => void
   setDefaultLlmModel: (model: string) => void
   setProviderConfigs: (configs: ProviderConfigs) => void
   setActivePresetId: (id: string | null) => void
@@ -733,6 +737,8 @@ export const useWikiStore = create<WikiState>((set) => ({
     localCliIsolation: false,
   },
   aiChatModel: "",
+  aiOutlineModel: "",
+  aiOutlineModelRevision: 0,
   defaultLlmModel: "",
   providerConfigs: {},
   activePresetId: null,
@@ -901,6 +907,10 @@ export const useWikiStore = create<WikiState>((set) => ({
 
   setLlmConfig: (llmConfig) => set({ llmConfig }),
   setAiChatModel: (aiChatModel) => set({ aiChatModel }),
+  setAiOutlineModel: (aiOutlineModel) => set((state) => ({
+    aiOutlineModel,
+    aiOutlineModelRevision: state.aiOutlineModelRevision + 1,
+  })),
   setDefaultLlmModel: (defaultLlmModel) => set({ defaultLlmModel }),
   setProviderConfigs: (providerConfigs) => set({ providerConfigs }),
   setActivePresetId: (activePresetId) => set({ activePresetId }),

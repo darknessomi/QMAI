@@ -6,6 +6,8 @@ vi.mock("@/commands/fs", () => fsMocks)
 import type { OutlineChatConversation } from "./outline-chat-store"
 import { useOutlineChatStore } from "./outline-chat-store"
 import { useWikiStore } from "./wiki-store"
+import { createNovelGenerationRequestPackage, getOutlineMessageModelContent } from "@/lib/novel/novel-generation-request-package"
+import type { OutlineWizardRequest } from "@/lib/novel/outline-wizard"
 
 function conversation(id: string): OutlineChatConversation {
   return { id, title: id, createdAt: 10, updatedAt: 10, messages: [] }
@@ -154,4 +156,44 @@ describe("outline-chat-store", () => {
       conversations: [], activeConversationId: null, pendingReferenceTokens: [], loaded: true,
     })
   })
+  it("persists structured model content and reloads legacy messages", async () => {
+    useWikiStore.setState({ project: { name: "??", path: "C:/Book" } })
+    const request: OutlineWizardRequest = {
+      task: "newBook", length: "auto", channel: "auto", genre: "auto", customGenre: "",
+      inspiration: "persisted inspiration", sellingPoints: [], targets: ["outline"], scale: "",
+      narrative: "auto", materialSource: "none",
+    }
+    const structured = createNovelGenerationRequestPackage(request, "full model workflow")
+    const stored = conversation("persisted")
+    stored.messages = [
+      { id: "new", role: "user", content: structured.summary, novelGenerationRequest: structured },
+      { id: "old", role: "user", content: "legacy body" },
+    ]
+    useOutlineChatStore.setState({ conversations: [stored], activeConversationId: "persisted" })
+    await useOutlineChatStore.getState().saveToDisk()
+    const savedJson = fsMocks.writeFile.mock.calls[0][1]
+    fsMocks.readFile.mockResolvedValue(savedJson)
+    useOutlineChatStore.setState({ conversations: [], activeConversationId: null })
+    await useOutlineChatStore.getState().loadFromDisk()
+    const messages = useOutlineChatStore.getState().conversations[0].messages
+    expect(messages[0].content).toBe(structured.summary)
+    expect(getOutlineMessageModelContent(messages[0])).toBe("full model workflow")
+    expect(getOutlineMessageModelContent(messages[1])).toBe("legacy body")
+  })
+
+  it.each([
+    { version: 2, summary: "??", details: ["??"], modelContent: "??" },
+    { version: 1, summary: "??", details: ["??"] },
+    { version: 1, summary: "??", details: "??", modelContent: "??" },
+  ])("ignores invalid persisted novel request package %#", async (invalidPackage) => {
+    useWikiStore.setState({ project: { name: "??", path: "C:/Book" } })
+    const stored = conversation("invalid")
+    stored.messages = [{ id: "u", role: "user", content: "????", novelGenerationRequest: invalidPackage as never }]
+    fsMocks.readFile.mockResolvedValue(JSON.stringify({ conversations: [stored], activeConversationId: "invalid" }))
+    await useOutlineChatStore.getState().loadFromDisk()
+    const message = useOutlineChatStore.getState().conversations[0].messages[0]
+    expect(message.novelGenerationRequest).toBeUndefined()
+    expect(getOutlineMessageModelContent(message)).toBe("????")
+  })
+
 })

@@ -4,6 +4,7 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { OutlineWizardDialog } from "./outline-wizard-dialog"
+import { createNovelGenerationRequestPackage } from "@/lib/novel/novel-generation-request-package"
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true
@@ -98,4 +99,48 @@ describe("OutlineWizardDialog", () => {
     })
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
+  it("marks real initial values as implicit", async () => {
+    const { createDefaultOutlineWizardRequest } = await import("./outline-wizard-dialog")
+    const request = createDefaultOutlineWizardRequest()
+    expect(request.sellingPoints).toEqual(["AI 根据灵感推荐"])
+    expect(request).toMatchObject({ length: "long", channel: "male", narrative: "thirdPerson", explicit: {} })
+  })
+
+  it("clears explicit genre fields when channel derives a new genre", async () => {
+    const onSubmit = vi.fn()
+    await act(async () => root.render(<OutlineWizardDialog open onOpenChange={() => {}} onSubmit={onSubmit} />))
+    const select = document.body.querySelector("select") as HTMLSelectElement
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
+      setter?.call(select, "custom")
+      select.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    const custom = document.body.querySelector("#outline-wizard-custom-genre") as HTMLInputElement
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+      setter?.call(custom, "自定义题材")
+      custom.dispatchEvent(new Event("input", { bubbles: true }))
+      findButton(document.body, "女频").click()
+    })
+    const textarea = document.body.querySelector("textarea") as HTMLTextAreaElement
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+      setter?.call(textarea, "灵感")
+      textarea.dispatchEvent(new Event("input", { bubbles: true }))
+      findButton(document.body, "确定生成").click()
+    })
+    expect(onSubmit.mock.calls[0][0].explicit.genre).toBeUndefined()
+    expect(onSubmit.mock.calls[0][0].explicit.customGenre).toBeUndefined()
+    expect(createNovelGenerationRequestPackage(onSubmit.mock.calls[0][0], "model").details.join("\n")).not.toContain("题材类型")
+    await act(async () => {
+      const currentSelect = document.body.querySelector("select") as HTMLSelectElement
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
+      setter?.call(currentSelect, currentSelect.options[1].value)
+      currentSelect.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    await act(async () => findButton(document.body, "确定生成").click())
+    expect(onSubmit.mock.calls[1][0].explicit.genre).toBe(true)
+    expect(createNovelGenerationRequestPackage(onSubmit.mock.calls[1][0], "model").details.join("\n")).toContain("题材类型")
+  })
+
 })

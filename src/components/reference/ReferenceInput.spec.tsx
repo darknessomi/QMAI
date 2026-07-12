@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ReferenceInput, type InsertReferenceTokens } from "./ReferenceInput"
 import type { ReferenceToken } from "@/lib/reference/types"
 
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
 let host: HTMLDivElement
 let root: Root
 

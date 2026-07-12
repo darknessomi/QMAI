@@ -21,6 +21,7 @@ import {
   ArrowDown,
 } from "lucide-react";
 import { useWikiStore } from "@/stores/wiki-store";
+import { saveAiOutlineModel } from "@/lib/project-store";
 import {
   useOutlineChatStore,
   type OutlineMultiAgentRunState,
@@ -52,6 +53,7 @@ import {
   type OutlineSaveConfirmPayload,
 } from "@/components/sources/outline-save-confirm-dialog";
 import { OutlineWizardDialog } from "@/components/sources/outline-wizard-dialog";
+import { NovelGenerationRequestMessage } from "@/components/sources/novel-generation-request-message";
 import { OutlineMultiAgentPanel } from "@/components/sources/outline-multi-agent-panel";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -69,6 +71,14 @@ import {
   getOutlineWizardSkillNames,
   type OutlineWizardRequest,
 } from "@/lib/novel/outline-wizard";
+import {
+  createNovelGenerationRequestPackage,
+  mapOutlineMessagesForModel,
+  buildOutlineRegenerationInput,
+  isExplicitStructuredGenerationFollowUp,
+  mapOutlineConversationsForModel,
+  type NovelGenerationRequestPackage,
+} from "@/lib/novel/novel-generation-request-package";
 import {
   type OutlineSubAgentPlan,
   planOutlineSubAgents,
@@ -103,6 +113,7 @@ import {
 import {
   resolveModelConfig,
   resolveNovelModel,
+  resolveUsableModelKey,
 } from "@/lib/novel/model-resolver";
 import { ChatModelSelector } from "@/components/chat/chat-model-selector";
 import { useStreamingText } from "@/hooks/use-streaming-text";
@@ -182,6 +193,8 @@ import {
 } from "@/lib/conversation-create-guard";
 import { outlineConversationRunRegistry } from "@/lib/conversation-run-registry";
 import { toast } from "@/lib/toast";
+import { finalizeStructuredMarkdownMessage } from "@/lib/novel/markdown-quality-finalizer";
+import { repairMarkdownFormatWithAi } from "@/lib/novel/markdown-quality-ai-repair";
 import {
   type OutlineWorkflowStage,
   canTransitionOutlineWorkflow,
@@ -190,7 +203,10 @@ import {
   canApplyOutlineRunEffect,
   setOutlineSessionValue,
   shouldClearOutlineDraft,
+  shouldClearOutlineReferences,
 } from "@/lib/novel/outline-chat-session-state";
+
+type OutlineSendResult = { started: boolean; sent: boolean };
 
 const OUTLINE_CHAT_DISABLED_TOOLS = ["write_chapter", "write_memory"];
 const OUTLINE_CHAT_WIZARD_DISABLED_TOOLS = [
@@ -296,7 +312,7 @@ function buildOutlineAgentUserContent(
   ].join("\n");
 }
 
-function buildOutlineAgentSystemPrompt(options: {
+export function buildOutlineAgentSystemPrompt(options: {
   projectName?: string;
   webResearchContext?: string;
   soulDoc?: string;
@@ -336,6 +352,7 @@ function buildOutlineAgentSystemPrompt(options: {
     "关键内容提取必须服务于小说创作：只保留能帮助用户继续写小说的信息，例如章节目标、冲突推进、人物动机、伏笔状态、设定限制、时间线承接和结尾钩子。",
     "生成章纲时必须使用章纲标准结构：基础信息、上层依据、本章目标、核心事件、场景顺序、结构节点、章首钩子、爽点设计、章尾钩子、执行约束、人物状态、伏笔与追踪、待写回设定、写作约束、AI写作提示。核心事件不少于6条，场景顺序为2-4个场景。",
     "结构节点必须包含 CBN、CPNs、CEN；CEN 必须能承接下一章 CBN。执行约束必须包含必须覆盖节点和本章禁区。基础信息必须包含时间锚点、章内时间跨度和与上章时间差。",
+    "Markdown 格式约束：结构化资料使用一级标题，** 必须成对，不要用代码围栏包裹全文，已有表格必须保留合法分隔行。",
     "## AI 大纲输出协议",
     "当本轮生成了可保存的大纲、卷纲、章纲、人物、设定、伏笔、组织或质量检查内容时，最终回复末尾必须附加一个 json 代码块，顶层字段为 outlineSaveRequest 或 outlineSaveRequests。",
     "保存请求必须包含 targetFolder、fileName、fileType、writeMode、referencedSkills、sourceIntent。fileName 必须是 .md 文件，targetFolder 必须位于大纲文件树文件夹内。",
@@ -818,8 +835,10 @@ function OutlineAssistantMessage({
   onRegenerate,
   onConfirmToolSave,
   onRejectTool,
-  onGenerateSection,
   onSendMessage,
+  nextStepDisabled,
+  nextStepDisabledReason,
+  generationContext,
   onFocusInput,
 }: {
   msg: import("@/stores/outline-chat-store").OutlineChatMessage;
@@ -834,8 +853,10 @@ function OutlineAssistantMessage({
   onRegenerate: (index: number) => Promise<void>;
   onConfirmToolSave: (call: ToolCallRecord & { preview?: string }) => void;
   onRejectTool: (call: ToolCallRecord & { preview?: string }) => void;
-  onGenerateSection: (title: string, requestHint: string) => void;
-  onSendMessage: (text: string, options?: { intentPhase?: "intent_analysis" | "generation" | "waiting_user_input"; scope?: string }) => void;
+  onSendMessage: (text: string, options?: { intentPhase?: "intent_analysis" | "generation" | "waiting_user_input"; scope?: string }) => Promise<boolean>;
+  nextStepDisabled: boolean;
+  nextStepDisabledReason?: string;
+  generationContext: boolean;
   onFocusInput: () => void;
 }) {
   const [editApplied, setEditApplied] = useState(false);
@@ -970,19 +991,14 @@ function OutlineAssistantMessage({
         />
       ) : null}
       {/* 下一步推荐 */}
-      {msg.nextStepRecommendation && msg.nextStepRecommendation.recommendations.length > 0 && !isStreaming ? (
+      {msg.nextStepRecommendation && msg.nextStepRecommendation.recommendations.length > 0 ? (
         <NextStepCard
           recommendation={msg.nextStepRecommendation}
-          onSelectRecommendation={(recId, label) => {
-            if (recId === "D") {
-              onFocusInput();
-            } else {
-              const config = OUTLINE_SECTION_GENERATION_CONFIGS.find(c => c.title === label);
-              if (config) {
-                onGenerateSection(config.title, config.requestHint);
-              }
-            }
-          }}
+          onSelectRecommendation={(_recId, label) => onSendMessage(label, isExplicitStructuredGenerationFollowUp(label, { generationContext })
+            ? { intentPhase: "generation", scope: label }
+            : undefined)}
+          disabled={nextStepDisabled}
+          disabledReason={nextStepDisabledReason}
         />
       ) : null}
     </>
@@ -1089,6 +1105,10 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   const llmConfig = useWikiStore((s) => s.llmConfig);
   const novelConfig = useWikiStore((s) => s.novelConfig);
   const providerConfigs = useWikiStore((s) => s.providerConfigs);
+  const aiChatModel = useWikiStore((s) => s.aiChatModel);
+  const aiOutlineModel = useWikiStore((s) => s.aiOutlineModel);
+  const defaultLlmModel = useWikiStore((s) => s.defaultLlmModel);
+  const setAiOutlineModel = useWikiStore((s) => s.setAiOutlineModel);
   const chatConversations = useChatStore((s) => s.conversations);
 
   const conversations = useOutlineChatStore((s) => s.conversations);
@@ -1169,14 +1189,38 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
     return false;
   }, [providerConfigs]);
 
+  const defaultOutlineLlmConfig = useMemo(
+    () => resolveNovelModel(llmConfig, novelConfig, "writing"),
+    [aiChatModel, defaultLlmModel, llmConfig, novelConfig, providerConfigs],
+  );
+  const storedOutlineModelId = useMemo(
+    () => resolveUsableModelKey(aiOutlineModel, llmConfig, providerConfigs),
+    [aiOutlineModel, llmConfig, providerConfigs],
+  );
+  const fallbackOutlineModelId = useMemo(() => {
+    const workflowDefaultModel = novelConfig.defaultLlmModel?.trim() || defaultLlmModel.trim();
+    return resolveUsableModelKey(aiChatModel, llmConfig, providerConfigs)
+      || resolveUsableModelKey(workflowDefaultModel, llmConfig, providerConfigs)
+      || resolveUsableModelKey(defaultOutlineLlmConfig.model, llmConfig, providerConfigs);
+  }, [
+    aiChatModel,
+    defaultLlmModel,
+    defaultOutlineLlmConfig.model,
+    llmConfig,
+    novelConfig.defaultLlmModel,
+    providerConfigs,
+  ]);
+  const effectiveOutlineModelId = storedOutlineModelId || fallbackOutlineModelId;
+
   const [inputValue, setInputValue] = useState("");
   const [outlineReferenceTokens, setOutlineReferenceTokens] = useState<
     ReferenceToken[]
   >([]);
+  const outlineReferenceTokensRef = useRef<ReferenceToken[]>([]);
   const [forceRefreshNext, setForceRefreshNext] = useState(false);
   const [referencePickerOpen, setReferencePickerOpen] = useState(false);
   const [outlineWizardOpen, setOutlineWizardOpen] = useState(false);
-  const [localModelId, setLocalModelId] = useState(activeConv?.modelId ?? "");
+  const [localModelId, setLocalModelId] = useState(effectiveOutlineModelId);
   const insertReferenceTokensRef = useRef<InsertReferenceTokens>(null);
   const [hoveredConversationId, setHoveredConversationId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -1278,9 +1322,43 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   }, [project?.path]);
 
   // 当前会话切换或持久化 modelId 变化时，同步本地选择状态
+  const persistOutlineModel = useCallback((modelId: string) => {
+    void saveAiOutlineModel(modelId).catch(() => {
+      toast.info(
+        "\u0041\u0049 \u5927\u7eb2\u6a21\u578b\u4fdd\u5b58\u5931\u8d25\uff0c\u672c\u6b21\u9009\u62e9\u4ecd\u53ef\u7ee7\u7eed\u4f7f\u7528\u3002",
+        { dedupeKey: "outline-model-save-failed" },
+      );
+    });
+  }, []);
+
   useEffect(() => {
-    setLocalModelId(activeConv?.modelId ?? "");
-  }, [activeConv?.modelId]);
+    setLocalModelId(effectiveOutlineModelId);
+    if (!effectiveOutlineModelId) return;
+
+    if (activeConversationId && activeConv?.modelId !== effectiveOutlineModelId) {
+      setConversationModel(activeConversationId, effectiveOutlineModelId);
+    }
+    if (aiOutlineModel === effectiveOutlineModelId) return;
+
+    const unavailableStoredModel = aiOutlineModel.trim().length > 0 && !storedOutlineModelId;
+    setAiOutlineModel(effectiveOutlineModelId);
+    if (unavailableStoredModel) {
+      toast.info(
+        "\u539f \u0041\u0049 \u5927\u7eb2\u6a21\u578b\u5df2\u4e0d\u53ef\u7528\uff0c\u5df2\u56de\u9000\u5230\u5f53\u524d\u9ed8\u8ba4\u6a21\u578b\u3002",
+        { dedupeKey: "outline-model-fallback" },
+      );
+    }
+    persistOutlineModel(effectiveOutlineModelId);
+  }, [
+    activeConv?.modelId,
+    activeConversationId,
+    aiOutlineModel,
+    effectiveOutlineModelId,
+    persistOutlineModel,
+    setAiOutlineModel,
+    setConversationModel,
+    storedOutlineModelId,
+  ]);
 
   useEffect(() => {
     if (!historyOpen) return;
@@ -1608,15 +1686,16 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         conversationId?: string;
         clearDraft?: boolean;
         intentPhase?: "intent_analysis" | "generation" | "waiting_user_input";
+        novelGenerationRequest?: NovelGenerationRequestPackage;
       } = {},
-    ) => {
+    ): Promise<OutlineSendResult> => {
       const prompt = inputText.trim();
-      if (!prompt || !project) return;
+      if (!prompt || !project) return { started: false, sent: false };
       const requestedConversationId = options.conversationId ?? activeConversationId;
       const requestedRunState = requestedConversationId
         ? useOutlineChatStore.getState().runStates[requestedConversationId]
         : undefined;
-      if (requestedRunState?.status === "running") return;
+      if (requestedRunState?.status === "running") return { started: false, sent: false };
       let convId = requestedConversationId;
       if (!convId) convId = createConversation();
       let effectiveLlmConfig = resolveNovelModel(
@@ -1627,15 +1706,14 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       const targetConversation = options.conversationId
         ? useOutlineChatStore.getState().conversations.find((conversation) => conversation.id === options.conversationId)
         : activeConv;
-      if (targetConversation?.modelId) {
+      if (effectiveOutlineModelId) {
         effectiveLlmConfig = resolveModelConfig(
-          targetConversation.modelId,
+          effectiveOutlineModelId,
           effectiveLlmConfig,
           providerConfigs,
         );
       }
-      const effectiveModelId =
-        targetConversation?.modelId || effectiveLlmConfig.model || "";
+      const effectiveModelId = effectiveOutlineModelId || effectiveLlmConfig.model || "";
       if (!hasUsableLlm(effectiveLlmConfig, providerConfigs)) {
         addMessage(convId, {
           id: crypto.randomUUID(),
@@ -1643,7 +1721,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           content:
             "请先在设置中配置并选择一个可用的 AI 模型，或在下方模型选择器中选择模型后再试。",
         });
-        return;
+        return { started: false, sent: false };
       }
       if (!modelSupportsTools(effectiveModelId)) {
         addMessage(convId, {
@@ -1652,12 +1730,12 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           content:
             "当前模型不支持 AI 大纲工具调用，请在下方模型选择器中更换支持工具调用的模型。",
         });
-        return;
+        return { started: false, sent: false };
       }
 
       const capturedConvId = convId;
       const runId = crypto.randomUUID();
-      if (!startConversationRun(capturedConvId, runId)) return;
+      if (!startConversationRun(capturedConvId, runId)) return { started: false, sent: false };
       const controller = new AbortController();
       outlineConversationRunRegistry.register(capturedConvId, controller);
       const isCurrentRun = () => canApplyOutlineRunEffect(
@@ -1666,7 +1744,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         runId,
       );
       const setCapturedWorkflowStage = (stage: OutlineWorkflowStage) => {
-        if (!isCurrentRun()) return;
+        if (!isCurrentRun()) return { started: true, sent: false };
         setOutlineWorkflowStages((stages) => setOutlineSessionValue(stages, capturedConvId, stage));
       };
       if (shouldClearOutlineDraft({
@@ -1675,22 +1753,15 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         activeConversationId: useOutlineChatStore.getState().activeConversationId,
       })) {
         setInputValue("");
+        outlineReferenceTokensRef.current = [];
         setOutlineReferenceTokens([]);
       }
 
-      const historyBeforeSend = (
+      const historyBeforeSend = mapOutlineMessagesForModel(
         useOutlineChatStore
           .getState()
-          .conversations.find((c) => c.id === convId)?.messages ?? []
-      )
-        .filter((message) => message.content.trim() && !message.isAgentRunning)
-        .map(
-          (message) =>
-            ({
-              role: message.role,
-              content: message.content,
-            }) satisfies AgentMessage,
-        );
+          .conversations.find((c) => c.id === convId)?.messages ?? [],
+      ) satisfies AgentMessage[];
       const hasPriorAssistantAnswer = historyBeforeSend.some(
         (message) => message.role === "assistant" && message.content.trim(),
       );
@@ -1720,7 +1791,8 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       const userMsg: OutlineChatMessage = {
         id: crypto.randomUUID(),
         role: "user",
-        content: prompt,
+        content: options.novelGenerationRequest?.summary ?? prompt,
+        novelGenerationRequest: options.novelGenerationRequest,
         attachedReferences: tokens,
       };
       const initialSources = tokens.map(
@@ -1818,16 +1890,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
                 }));
               },
               getOutlineConversations: () =>
-                useOutlineChatStore
-                  .getState()
-                  .conversations.map((conversation) => ({
-                    id: conversation.id,
-                    title: conversation.title,
-                    messages: conversation.messages.map((message) => ({
-                      role: message.role,
-                      content: message.content,
-                    })),
-                  })),
+                mapOutlineConversationsForModel(
+                  useOutlineChatStore.getState().conversations,
+                ),
               llmConfig: effectiveLlmConfig,
               disabledTools: mergeDisabledTools(
                 disableWriteTools
@@ -1874,7 +1939,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
               onToolResult: () => {},
               onToolError: () => {},
               onToolEvent: (event) => {
-                if (!isCurrentRun()) return;
+                if (!isCurrentRun()) return { started: true, sent: false };
                 if (!historyPlan.showToolProcess) {
                   hiddenToolCalls = applyAgentToolEvent(hiddenToolCalls, event);
                   return;
@@ -1962,7 +2027,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             plan: subAgentPlan,
             maxConcurrency,
             onStatusChange: (event) => {
-              if (!isCurrentRun()) return;
+              if (!isCurrentRun()) return { started: true, sent: false };
               updateOutlineMultiAgentItem(convId, assistantId, event.agentId, (agent) => ({
                 ...agent,
                 status: event.status === "completed"
@@ -2037,10 +2102,12 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
                 ...run,
                 mode: "single-agent-fallback",
                 status: "fallback",
-                merge: {
-                  status: "skipped",
-                  summary: "已回退为单 Agent 生成。",
-                },
+                merge: run.merge?.status === "error"
+                  ? run.merge
+                  : {
+                      status: "skipped",
+                      summary: "\u5df2\u56de\u9000\u4e3a\u5355 Agent \u751f\u6210\u3002",
+                    },
                 fallbackReason: run.fallbackReason ?? "多 Agent 不可用或部分子 Agent 失败，已自动回退。",
               }) : run);
               if (isCurrentRun()) {
@@ -2087,12 +2154,29 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
                   ].join("\n"),
                 },
               ];
-              const mergeRun = await runOutlineAgentOnce(mergeMessages, {
-                skillNames: options.preferredSkillNames,
-                disableWriteTools: true,
-                streamToUser: true,
-                statusText: "多 Agent 已完成，正在合并大纲结果...",
-              });
+              let mergeRun: { text: string; record: AgentRunRecord };
+              try {
+                mergeRun = await runOutlineAgentOnce(mergeMessages, {
+                  skillNames: options.preferredSkillNames,
+                  disableWriteTools: true,
+                  streamToUser: true,
+                  statusText: "\u591a Agent \u5df2\u5b8c\u6210\uff0c\u6b63\u5728\u5408\u5e76\u5927\u7eb2\u7ed3\u679c...",
+                });
+              } catch (error) {
+                if (isCurrentRun()) {
+                  const message = error instanceof Error ? error.message : String(error);
+                  updateOutlineMultiAgentRun(convId, assistantId, (run) => run ? ({
+                    ...run,
+                    merge: {
+                      ...run.merge,
+                      status: "error",
+                      error: message,
+                      finishedAt: Date.now(),
+                    },
+                  }) : run);
+                }
+                throw error;
+              }
               if (!isCurrentRun()) throw new Error("aborted");
               updateOutlineMultiAgentRun(convId, assistantId, (run) => run ? ({
                 ...run,
@@ -2106,7 +2190,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
               return mergeRun.text || "AI大纲未返回内容。";
             },
           });
-          if (!isCurrentRun()) return;
+          if (!isCurrentRun()) return { started: true, sent: false };
           updateOutlineMultiAgentRun(convId, assistantId, (run) => {
             if (!run) return run;
             const successful = new Set(multiAgentResult.successfulAgents);
@@ -2126,7 +2210,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
                 }
                 return agent;
               }),
-              merge: multiAgentResult.mode === "multi-agent"
+              merge: multiAgentResult.mode === "multi-agent" || run.merge?.status === "error"
                 ? run.merge
                 : {
                     status: "skipped",
@@ -2139,7 +2223,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           finalText = await runSingleAgentFallback();
         }
 
-        if (!isCurrentRun()) return;
+        if (!isCurrentRun()) return { started: true, sent: false };
 
         const finalSources = Array.from(
           new Set([
@@ -2153,7 +2237,28 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           allowFallback: options.intentPhase === "generation",
           completedModule: intentContextsRef.current[capturedConvId]?.title || "当前模块",
         });
-        const finalContent = nextStepExtraction.cleanText || "AI大纲未返回内容。";
+        const cleanFinalContent = nextStepExtraction.cleanText || "AI大纲未返回内容。";
+        const structuredMarkdownEnabled = options.intentPhase === "generation"
+          || options.novelGenerationRequest !== undefined;
+        const finalContent = await finalizeStructuredMarkdownMessage(
+          cleanFinalContent,
+          {
+            enabled: structuredMarkdownEnabled,
+            repairWithAi: ({ content, maxTokens }) => repairMarkdownFormatWithAi({
+              content,
+              llmConfig: effectiveLlmConfig,
+              signal: controller.signal,
+              maxTokens,
+            }),
+            onFailure: () => {
+              if (!isCurrentRun()) return { started: true, sent: false };
+              toast.info("Markdown 格式自动修复未完全通过，已保留内容最完整的版本。", {
+                dedupeKey: "outline-markdown-quality-incomplete",
+              });
+            },
+          },
+        );
+        if (!isCurrentRun()) return { started: true, sent: false };
         const visibleToolCalls = allToolCalls.length ? allToolCalls : [];
         const shouldShowToolProcess =
           historyPlan.showToolProcess ||
@@ -2217,10 +2322,10 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             { role: "assistant", content: finalContent },
           ]),
         };
-        if (!isCurrentRun()) return;
+        if (!isCurrentRun()) return { started: true, sent: false };
         setConversationContextSummary(convId, nextContextSummaryPayload.contextSummary);
         await handleAutoSaveOutlineRequests(capturedConvId, finalContent, isCurrentRun);
-        if (!isCurrentRun()) return;
+        if (!isCurrentRun()) return { started: true, sent: false };
         const firstUser = useOutlineChatStore
           .getState()
           .conversations.find((conversation) => conversation.id === convId)
@@ -2254,10 +2359,11 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             intentPhase: "generation",
           });
         }
+        return { started: true, sent: true };
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         const aborted = controller.signal.aborted || errorMsg.toLowerCase().includes("aborted");
-        if (aborted || !isCurrentRun()) return;
+        if (aborted || !isCurrentRun()) return { started: true, sent: false };
         const partial = useOutlineChatStore.getState().getStreamingContent(capturedConvId);
         if (partial) {
           updateOutlineAssistantMessage(convId, assistantId, (message) => ({
@@ -2303,6 +2409,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           });
         }
         void useOutlineChatStore.getState().saveToDisk();
+        return { started: true, sent: false };
       } finally {
         outlineConversationRunRegistry.remove(capturedConvId, controller);
         if (isCurrentRun()) setCapturedWorkflowStage("idle");
@@ -2314,6 +2421,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       llmConfig,
       novelConfig,
       providerConfigs,
+      effectiveOutlineModelId,
       activeConv,
       activeConversationId,
       createConversation,
@@ -2351,22 +2459,68 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   );
 
   const handleSendMessage = useCallback(
-    (text: string, options?: { intentPhase?: "intent_analysis" | "generation" | "waiting_user_input"; scope?: string }) => {
+    async (text: string, options?: { intentPhase?: "intent_analysis" | "generation" | "waiting_user_input"; scope?: string }) => {
       const capturedConvId = activeConversationId;
-      if (!capturedConvId) return;
-      if (options?.intentPhase === "generation") {
-        if (activeConversationId && canTransitionOutlineWorkflow(outlineWorkflowStage, "sufficiency_check")) {
-          setOutlineWorkflowStages((stages) => setOutlineSessionValue(stages, activeConversationId, "sufficiency_check"));
-        }
-        const scope = options.scope || text;
-        const intentContext = intentContextsRef.current[capturedConvId] ?? { title: "", hint: "" };
-        const generationPrompt = buildGenerationPrompt(intentContext.title, intentContext.hint, scope, intentContext.outputMode);
-        void handleSend(generationPrompt, [], { conversationId: capturedConvId, intentPhase: "generation" });
-      } else {
-        void handleSend(text, [], { conversationId: capturedConvId, intentPhase: options?.intentPhase });
+      if (!capturedConvId) {
+        toast.info("当前没有可用的大纲会话，请先新建会话。", { dedupeKey: "outline-next-step:no-conversation" });
+        return false;
       }
+      if (!canStartConversationRun(capturedConvId)) {
+        const currentRunning = useOutlineChatStore.getState().runStates[capturedConvId]?.status === "running";
+        toast.info(currentRunning
+          ? "当前会话正在生成，请等待生成完成后再选择下一步。"
+          : "大纲 AI 会话最多同时运行 3 个任务，请等待任一任务结束后再发送。", {
+          dedupeKey: `outline-next-step:busy:${capturedConvId}`,
+        });
+        return false;
+      }
+      try {
+        if (options?.intentPhase === "generation") {
+          if (canTransitionOutlineWorkflow(outlineWorkflowStage, "sufficiency_check")) {
+            setOutlineWorkflowStages((stages) => setOutlineSessionValue(stages, capturedConvId, "sufficiency_check"));
+          }
+          const scope = options.scope || text;
+          const intentContext = intentContextsRef.current[capturedConvId] ?? { title: "", hint: "" };
+          const generationPrompt = buildGenerationPrompt(intentContext.title, intentContext.hint, scope, intentContext.outputMode);
+          const references = outlineReferenceTokens;
+          const result = await handleSend(generationPrompt, references, { conversationId: capturedConvId, intentPhase: "generation", clearDraft: false });
+          if (result.sent) {
+            if (shouldClearOutlineReferences({
+              invocationConversationId: capturedConvId,
+              activeConversationId: useOutlineChatStore.getState().activeConversationId,
+              sentReferences: references,
+              currentReferences: outlineReferenceTokensRef.current,
+            })) {
+              outlineReferenceTokensRef.current = [];
+              setOutlineReferenceTokens([]);
+            }
+            return true;
+          }
+        } else {
+          const references = outlineReferenceTokens;
+          const result = await handleSend(text, references, { conversationId: capturedConvId, intentPhase: options?.intentPhase, clearDraft: false });
+          if (result.sent) {
+            if (shouldClearOutlineReferences({
+              invocationConversationId: capturedConvId,
+              activeConversationId: useOutlineChatStore.getState().activeConversationId,
+              sentReferences: references,
+              currentReferences: outlineReferenceTokensRef.current,
+            })) {
+              outlineReferenceTokensRef.current = [];
+              setOutlineReferenceTokens([]);
+            }
+            return true;
+          }
+        }
+      } catch {
+        // Promise reject is handled below; the card finally block restores busy and disabled state.
+      }
+      toast.info("发送失败，推荐操作已恢复，请稍后重试。", {
+        dedupeKey: `outline-next-step:send-failed:${capturedConvId}`,
+      });
+      return false;
     },
-    [activeConversationId, handleSend, outlineWorkflowStage],
+    [activeConversationId, canStartConversationRun, handleSend, outlineReferenceTokens, outlineWorkflowStage],
   );
 
   const handleFocusInput = useCallback(() => {
@@ -2380,10 +2534,12 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
 
   const handleSubmitOutlineWizard = useCallback(
     (request: OutlineWizardRequest) => {
-      void handleSend(buildOutlineWizardMultiAgentPrompt(request), [], {
+      const modelContent = buildOutlineWizardMultiAgentPrompt(request);
+      void handleSend(modelContent, outlineReferenceTokensRef.current, {
         disableWriteTools: true,
         preferredSkillNames: getOutlineWizardSkillNames(request),
         enableMultiAgent: true,
+        novelGenerationRequest: createNovelGenerationRequestPackage(request, modelContent),
       });
     },
     [handleSend],
@@ -2428,15 +2584,14 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         novelConfig,
         "writing",
       );
-      if (activeConv?.modelId) {
+      if (effectiveOutlineModelId) {
         effectiveLlmConfig = resolveModelConfig(
-          activeConv.modelId,
+          effectiveOutlineModelId,
           effectiveLlmConfig,
           providerConfigs,
         );
       }
-      const effectiveModelId =
-        activeConv?.modelId || effectiveLlmConfig.model || "";
+      const effectiveModelId = effectiveOutlineModelId || effectiveLlmConfig.model || "";
       if (!hasUsableLlm(effectiveLlmConfig, providerConfigs)) {
         addMessage(activeConversationId, {
           id: crypto.randomUUID(),
@@ -2486,23 +2641,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       userScrolledUpRef.current = false;
 
       try {
-        const lastUserRequest =
-          [...targetMessages]
-            .reverse()
-            .find((message) => message.role === "user")?.content ??
-          "请基于已有大纲重新生成。";
-        const historyMessages = targetMessages
-          .filter(
-            (message) => message.content.trim() && !message.isAgentRunning,
-          )
-          .filter((message) => message.content !== lastUserRequest)
-          .map(
-            (message) =>
-              ({
-                role: message.role,
-                content: message.content,
-              }) satisfies AgentMessage,
-          );
+        const regenerationInput = buildOutlineRegenerationInput(targetMessages);
+        const lastUserRequest = regenerationInput.request;
+        const historyMessages = regenerationInput.history satisfies AgentMessage[];
         let result = "";
         const assistantId = crypto.randomUUID();
 
@@ -2548,16 +2689,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
               }));
             },
             getOutlineConversations: () =>
-              useOutlineChatStore
-                .getState()
-                .conversations.map((conversation) => ({
-                  id: conversation.id,
-                  title: conversation.title,
-                  messages: conversation.messages.map((message) => ({
-                    role: message.role,
-                    content: message.content,
-                  })),
-                })),
+              mapOutlineConversationsForModel(
+                useOutlineChatStore.getState().conversations,
+              ),
             llmConfig: effectiveLlmConfig,
             disabledTools: OUTLINE_CHAT_DISABLED_TOOLS,
           },
@@ -2621,7 +2755,20 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           result || record.finalText || "AI大纲未返回内容。",
           { allowFallback: true, completedModule: "当前模块" },
         );
-        const finalContent = nextStepExtraction.cleanText || "AI大纲未返回内容。";
+        const cleanFinalContent = nextStepExtraction.cleanText || "AI大纲未返回内容。";
+        const finalContent = await finalizeStructuredMarkdownMessage(cleanFinalContent, {
+          enabled: regenerationInput.structuredGeneration,
+          repairWithAi: ({ content, maxTokens }) => repairMarkdownFormatWithAi({
+            content,
+            llmConfig: effectiveLlmConfig,
+            signal: controller.signal,
+            maxTokens,
+          }),
+          onFailure: () => toast.info("Markdown 格式自动修复未完全通过，已保留内容最完整的版本。", {
+            dedupeKey: "outline-markdown-quality-incomplete",
+          }),
+        });
+        if (!isCurrentRun()) return;
         updateOutlineAssistantMessage(
           capturedConvId,
           assistantId,
@@ -2675,6 +2822,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       llmConfig,
       novelConfig,
       providerConfigs,
+      effectiveOutlineModelId,
       activeConv,
       activeConversationId,
       addMessage,
@@ -3111,15 +3259,24 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
                   onRegenerate={handleRegenerate}
                   onConfirmToolSave={handleConfirmToolSave}
                   onRejectTool={handleRejectTool}
-                  onGenerateSection={handleGenerateSection}
                   onSendMessage={handleSendMessage}
+                  nextStepDisabled={submitDisabled}
+                  generationContext={activeMessages.slice(0, i).some((message) => message.role === "user" && Boolean(message.novelGenerationRequest))
+                    || Boolean(msg.nextStepRecommendation?.completedModule && /^#{1,6}\s/m.test(msg.content))}
+                  nextStepDisabledReason={isStreaming
+                    ? "当前会话正在生成，请等待生成完成后再选择下一步。"
+                    : submitDisabledReason}
                   onFocusInput={handleFocusInput}
                 />
               ) : (
                 <>
-                  <span className="block whitespace-pre-wrap break-words">
-                    {msg.content}
-                  </span>
+                  {msg.novelGenerationRequest ? (
+                    <NovelGenerationRequestMessage request={msg.novelGenerationRequest} />
+                  ) : (
+                    <span className="block whitespace-pre-wrap break-words">
+                      {msg.content}
+                    </span>
+                  )}
                   {msg.attachedReferences &&
                   msg.attachedReferences.length > 0 ? (
                     <div className="mt-1 flex flex-wrap gap-1">
@@ -3149,11 +3306,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
 
       {/* Input */}
       <div className="shrink-0 border-t px-3 py-2">
-        {isStreaming && (
-          <div className="mb-2 animate-pulse rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-300">
-            <span className="font-medium">正在生成...</span>
-          </div>
-        )}
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
             通过固定选项生成大纲需求，再交给 AI 分析和追问
@@ -3177,9 +3329,13 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           placeholder="输入关于大纲的问题..."
           onChange={(text, tokens) => {
             setInputValue(text);
+            outlineReferenceTokensRef.current = tokens;
             setOutlineReferenceTokens(tokens);
           }}
-          onTokensChange={setOutlineReferenceTokens}
+          onTokensChange={(tokens) => {
+            outlineReferenceTokensRef.current = tokens;
+            setOutlineReferenceTokens(tokens);
+          }}
           onSubmit={handleSend}
           onAtTrigger={() => setReferencePickerOpen(true)}
           insertTokensRef={insertReferenceTokensRef}
@@ -3197,9 +3353,11 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
                 value={localModelId}
                 onChange={(value) => {
                   setLocalModelId(value);
+                  setAiOutlineModel(value);
                   if (activeConversationId) {
                     setConversationModel(activeConversationId, value);
                   }
+                  persistOutlineModel(value);
                 }}
                 disabled={false}
               />

@@ -2,6 +2,7 @@ import { useWikiStore, type LlmConfig, type NovelConfig, type ProviderOverride }
 import { LLM_PRESETS } from "@/components/settings/llm-presets"
 import { resolveConfig } from "@/components/settings/preset-resolver"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
+import { getStableAvailableModelKey } from "@/lib/llm-model-keys"
 
 export type NovelTaskType = "writing" | "review" | "summary" | "extract" | "lint" | "deAi"
 
@@ -83,6 +84,17 @@ export function resolveModelConfig(
     }
   }
   return { ...baseConfig, model: targetModel }
+}
+
+export function resolveUsableModelKey(
+  targetModel: string,
+  baseConfig: LlmConfig,
+  providerConfigs: Record<string, ProviderOverride>,
+): string {
+  const stableModelKey = getStableAvailableModelKey(targetModel, providerConfigs)
+  if (!stableModelKey) return ""
+  const resolved = resolveModelConfig(stableModelKey, baseConfig, providerConfigs)
+  return isConfigUsable(resolved, providerConfigs) ? stableModelKey : ""
 }
 
 function resolveProjectDefaultLlmModel(): string {

@@ -48,6 +48,9 @@ export async function addToRecentProjects(
 
 const LLM_CONFIG_KEY = "llmConfig"
 const AI_CHAT_MODEL_KEY = "aiChatModel"
+const AI_OUTLINE_MODEL_KEY = "aiOutlineModel"
+let aiOutlineModelSaveRevision = 0
+let latestAiOutlineModel = ""
 const DEFAULT_LLM_MODEL_KEY = "defaultLlmModel"
 const PROVIDER_CONFIGS_KEY = "providerConfigs"
 const ACTIVE_PRESET_KEY = "activePresetId"
@@ -70,6 +73,24 @@ export async function saveAiChatModel(model: string): Promise<void> {
 export async function loadAiChatModel(): Promise<string | null> {
   const store = await getStore()
   return (await store.get<string>(AI_CHAT_MODEL_KEY)) ?? null
+}
+
+export async function saveAiOutlineModel(model: string): Promise<void> {
+  const writeRevision = ++aiOutlineModelSaveRevision
+  latestAiOutlineModel = model
+  const store = await getStore()
+  await store.set(AI_OUTLINE_MODEL_KEY, model)
+
+  let persistedRevision = writeRevision
+  while (persistedRevision !== aiOutlineModelSaveRevision) {
+    persistedRevision = aiOutlineModelSaveRevision
+    await store.set(AI_OUTLINE_MODEL_KEY, latestAiOutlineModel)
+  }
+}
+
+export async function loadAiOutlineModel(): Promise<string | null> {
+  const store = await getStore()
+  return (await store.get<string>(AI_OUTLINE_MODEL_KEY)) ?? null
 }
 
 export async function saveDefaultLlmModel(model: string): Promise<void> {

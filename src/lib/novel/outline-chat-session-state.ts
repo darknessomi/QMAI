@@ -17,6 +17,18 @@ export function shouldClearOutlineDraft(input: {
   return input.clearDraft && input.invocationConversationId === input.activeConversationId
 }
 
+export function shouldClearOutlineReferences(input: {
+  invocationConversationId: string | null
+  activeConversationId: string | null
+  sentReferences: ReadonlyArray<{ id: string }>
+  currentReferences: ReadonlyArray<{ id: string }>
+}): boolean {
+  if (input.invocationConversationId !== input.activeConversationId) return false
+  if (input.sentReferences.length !== input.currentReferences.length) return false
+  const currentIds = new Set(input.currentReferences.map((reference) => reference.id))
+  return input.sentReferences.every((reference) => currentIds.has(reference.id))
+}
+
 export function setOutlineSessionValue<T>(
   values: Record<string, T>,
   conversationId: string,

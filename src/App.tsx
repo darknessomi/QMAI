@@ -7,6 +7,7 @@ import { useChatStore } from "@/stores/chat-store"
 import { openProject, fileExists, listDirectory, readFile } from "@/commands/fs"
 import { getLastProject, saveLastProject, loadLlmConfig, loadAiChatModel, loadDefaultLlmModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, loadMaxHistoryMessages, loadUiFontFamily, loadVisualStyle, saveLlmConfig, loadLastReadChapter, loadMcpConfig } from "@/lib/project-store"
 import { loadReviewItems, loadChatHistory, saveChatHistory, saveReviewItems } from "@/lib/persist"
+import { initializeAiOutlineModelFromStorage } from "@/lib/ai-outline-model-initialization"
 import { setupAutoSave, teardownAutoSave } from "@/lib/auto-save"
 import { checkForAppUpdate } from "@/lib/app-updater"
 import { initAnalytics } from "@/lib/analytics"
@@ -249,6 +250,7 @@ function App() {
         if (savedAiChatModel) {
           useWikiStore.getState().setAiChatModel(savedAiChatModel)
         }
+        await initializeAiOutlineModelFromStorage()
         const savedDefaultLlmModel = await loadDefaultLlmModel()
         if (savedDefaultLlmModel) {
           useWikiStore.getState().setDefaultLlmModel(savedDefaultLlmModel)

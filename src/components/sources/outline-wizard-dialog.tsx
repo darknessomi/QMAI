@@ -24,6 +24,7 @@ import {
   type OutlineWizardChannel,
   type OutlineWizardOption,
   type OutlineWizardRequest,
+  type OutlineWizardExplicitField,
 } from "@/lib/novel/outline-wizard"
 
 interface OutlineWizardDialogProps {
@@ -36,7 +37,7 @@ function firstGenre(channel: OutlineWizardChannel): string {
   return getOutlineWizardGenres(channel)[0]?.value ?? "custom"
 }
 
-function createDefaultRequest(): OutlineWizardRequest {
+export function createDefaultOutlineWizardRequest(): OutlineWizardRequest {
   return {
     task: "newBook",
     length: "long",
@@ -49,6 +50,7 @@ function createDefaultRequest(): OutlineWizardRequest {
     scale: "",
     narrative: "thirdPerson",
     materialSource: "none",
+    explicit: {},
   }
 }
 
@@ -95,7 +97,7 @@ export function OutlineWizardDialog({
   onSubmit,
 }: OutlineWizardDialogProps) {
   const [request, setRequest] = useState<OutlineWizardRequest>(() =>
-    createDefaultRequest(),
+    createDefaultOutlineWizardRequest(),
   )
   const [error, setError] = useState("")
   const genreOptions = useMemo(
@@ -105,12 +107,22 @@ export function OutlineWizardDialog({
 
   useEffect(() => {
     if (!open) return
-    setRequest(createDefaultRequest())
+    setRequest(createDefaultOutlineWizardRequest())
     setError("")
   }, [open])
 
-  function updateRequest(next: Partial<OutlineWizardRequest>) {
-    setRequest((current) => ({ ...current, ...next }))
+  function updateRequest(
+    next: Partial<OutlineWizardRequest>,
+    explicitFields: OutlineWizardExplicitField[] = [],
+  ) {
+    setRequest((current) => ({
+      ...current,
+      ...next,
+      explicit: {
+        ...current.explicit,
+        ...Object.fromEntries(explicitFields.map((field) => [field, true])),
+      },
+    }))
     setError("")
   }
 
@@ -120,6 +132,7 @@ export function OutlineWizardDialog({
       channel,
       genre: firstGenre(channel),
       customGenre: "",
+      explicit: { ...current.explicit, channel: true, genre: undefined, customGenre: undefined },
     }))
     setError("")
   }
@@ -168,14 +181,14 @@ export function OutlineWizardDialog({
               label="生成任务"
               options={OUTLINE_WIZARD_TASK_OPTIONS}
               value={request.task}
-              onChange={(task) => updateRequest({ task })}
+              onChange={(task) => updateRequest({ task }, ["task"])}
             />
 
             <OptionGroup
               label="篇幅类型"
               options={OUTLINE_WIZARD_LENGTH_OPTIONS}
               value={request.length}
-              onChange={(length) => updateRequest({ length })}
+              onChange={(length) => updateRequest({ length }, ["length"])}
             />
 
             <OptionGroup
@@ -191,7 +204,7 @@ export function OutlineWizardDialog({
                 <select
                   id="outline-wizard-genre"
                   value={request.genre}
-                  onChange={(event) => updateRequest({ genre: event.target.value })}
+                  onChange={(event) => updateRequest({ genre: event.target.value }, ["genre"])}
                   className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                 >
                   {genreOptions.map((genre) => (
@@ -207,7 +220,7 @@ export function OutlineWizardDialog({
                   id="outline-wizard-scale"
                   value={request.scale}
                   placeholder="例如：100章左右、30万字、AI 根据题材判断"
-                  onChange={(event) => updateRequest({ scale: event.target.value })}
+                  onChange={(event) => updateRequest({ scale: event.target.value }, ["scale"])}
                 />
               </div>
             </div>
@@ -220,7 +233,7 @@ export function OutlineWizardDialog({
                   value={request.customGenre}
                   placeholder="请输入你想要的题材"
                   onChange={(event) =>
-                    updateRequest({ customGenre: event.target.value })
+                    updateRequest({ customGenre: event.target.value }, ["customGenre"])
                   }
                 />
               </div>
@@ -236,7 +249,7 @@ export function OutlineWizardDialog({
                 placeholder="写下故事灵感、主角处境、爽点方向，或说明要分析/修改/补全的处理要求"
                 className="min-h-28 resize-y"
                 onChange={(event) =>
-                  updateRequest({ inspiration: event.target.value })
+                  updateRequest({ inspiration: event.target.value }, ["inspiration"])
                 }
               />
             </div>
@@ -260,7 +273,7 @@ export function OutlineWizardDialog({
                           request.sellingPoints,
                           sellingPoint,
                         ),
-                      })
+                      }, ["sellingPoints"])
                     }
                   >
                     {sellingPoint}
@@ -283,7 +296,7 @@ export function OutlineWizardDialog({
                       onChange={() =>
                         updateRequest({
                           targets: toggleListValue(request.targets, target),
-                        })
+                        }, ["targets"])
                       }
                       className="h-4 w-4 accent-primary"
                     />
@@ -297,14 +310,14 @@ export function OutlineWizardDialog({
               label="叙事方式"
               options={OUTLINE_WIZARD_NARRATIVE_OPTIONS}
               value={request.narrative}
-              onChange={(narrative) => updateRequest({ narrative })}
+              onChange={(narrative) => updateRequest({ narrative }, ["narrative"])}
             />
 
             <OptionGroup
               label="已有资料来源"
               options={OUTLINE_WIZARD_MATERIAL_OPTIONS}
               value={request.materialSource}
-              onChange={(materialSource) => updateRequest({ materialSource })}
+              onChange={(materialSource) => updateRequest({ materialSource }, ["materialSource"])}
             />
 
             {error ? (
