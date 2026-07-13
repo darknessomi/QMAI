@@ -1,4 +1,4 @@
-﻿import { type CSSProperties, Suspense, lazy, useEffect, useCallback, useRef, useMemo, useState, useLayoutEffect } from "react"
+import { type CSSProperties, Suspense, lazy, useEffect, useCallback, useRef, useMemo, useState, useLayoutEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { Check, MoreHorizontal, X } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -54,6 +54,9 @@ import {
 } from "@/lib/chapter-selection"
 import { shouldApplyDiskToEditor } from "@/lib/editor-disk-sync"
 import { registerEditorDiskSyncHandler } from "@/lib/editor-disk-sync-session"
+import { registerEditorExternalUpdateHandler } from "@/lib/editor-external-update-session"
+import { createChapterExternalUpdateCoordinator } from "@/lib/chapter-external-update-coordinator"
+import { applyOpenChapterBodyUpdate } from "@/lib/novel/de-ai-batch/chapter-apply"
 
 const SnapshotViewer = lazy(async () => {
   const mod = await import("@/components/novel/snapshot-viewer")
@@ -181,6 +184,7 @@ export function PreviewPanel() {
   const outlineTasks = useOutlineGenerationStore((s) => s.tasks)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const saveGenerationRef = useRef(0)
+  const chapterExternalUpdateCoordinator = useMemo(() => createChapterExternalUpdateCoordinator(), [])
   const wikiEditorRef = useRef<WikiEditorHandle>(null)
   const [isSavingFinal, setIsSavingFinal] = useState(false)
   const [saveStatus, setSaveStatus] = useState<string>("")
@@ -241,7 +245,8 @@ export function PreviewPanel() {
     const key = normalizePath(path)
     lastLoadedRef.current = markdown
     lastLoadedByPathRef.current.set(key, markdown)
-  }, [])
+    chapterExternalUpdateCoordinator.markEditorSession(key)
+  }, [chapterExternalUpdateCoordinator])
 
   const applyDiskSyncIfSafe = useCallback(async (path: string): Promise<boolean> => {
     const normalizedPath = normalizePath(path)
@@ -283,6 +288,33 @@ export function PreviewPanel() {
     if (!path) return
     await applyDiskSyncIfSafe(path)
   }, [applyDiskSyncIfSafe])
+
+  const applyExternalChapterBody = useCallback(async (path: string, candidateContent: string): Promise<boolean> => {
+    const normalizedPath = normalizePath(path)
+    return applyOpenChapterBodyUpdate({
+      path: normalizedPath,
+      candidateContent,
+      currentOpenPath: () => selectedFileRef.current,
+      currentMarkdown: () => wikiEditorRef.current?.getCurrentMarkdown() ?? fileContentRef.current,
+      invalidatePendingSave: () => {
+        saveGenerationRef.current += 1
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      },
+      runExternalUpdate: chapterExternalUpdateCoordinator.runExternalUpdate,
+      markEditorSession: chapterExternalUpdateCoordinator.markEditorSession,
+      writeFileAtomic,
+      commitEditor: (markdown) => {
+        rememberLoadedChapter(normalizedPath, markdown)
+        fileContentRef.current = markdown
+        setFileContent(markdown)
+        setDiskSyncEpoch((epoch) => epoch + 1)
+      },
+      bumpDataVersion,
+    })
+  }, [bumpDataVersion, chapterExternalUpdateCoordinator, rememberLoadedChapter, setFileContent])
+
+  useEffect(() => registerEditorExternalUpdateHandler(applyExternalChapterBody), [applyExternalChapterBody])
 
   useEffect(() => {
     registerEditorDiskSyncHandler(applyDiskSyncIfSafe)
@@ -371,11 +403,13 @@ export function PreviewPanel() {
     const resolvedMarkdown = resolveChapterFlushMarkdown(path, markdown, lastLoadedByPathRef.current)
     if (!shouldSyncChapterOnLeave(path, markdown, lastLoadedForPath)) return
     try {
-      await syncChapterToCanonicalPath(path, resolvedMarkdown, { renameToCanonical: false })
+      await chapterExternalUpdateCoordinator.flushBeforeLeave(path, async () => {
+        await syncChapterToCanonicalPath(path, resolvedMarkdown, { renameToCanonical: false })
+      })
     } catch (err) {
       console.error("切换章节前同步文件失败:", err)
     }
-  }, [syncChapterToCanonicalPath, finalChapterSave])
+  }, [chapterExternalUpdateCoordinator, syncChapterToCanonicalPath, finalChapterSave])
 
   useEffect(() => {
     let cancelled = false

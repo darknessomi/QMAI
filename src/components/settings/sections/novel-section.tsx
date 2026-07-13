@@ -263,6 +263,23 @@ export function NovelSection({ draft, setDraft }: Props) {
           </div>
 
           <div className="space-y-2">
+            <Label htmlFor="de-ai-batch-concurrency-setting">批量去 AI 味并发作品数</Label>
+            <Input
+              id="de-ai-batch-concurrency-setting"
+              aria-label="批量去 AI 味并发作品数"
+              type="number"
+              min={1}
+              max={5}
+              value={draft.novelConfig.deAiBatchConcurrency}
+              onChange={(e) => updateNovelConfig({
+                deAiBatchConcurrency: Math.max(1, Math.min(5, Math.floor(Number(e.target.value) || 3))),
+              })}
+              className="w-24"
+            />
+            <p className="text-xs text-muted-foreground">默认同时处理 3 个作品，可设置 1–5；超出后按添加顺序排队。</p>
+          </div>
+
+          <div className="space-y-2">
             <div className="flex items-center gap-1.5">
               <Label>{t("novel.settings.searchTopK")}</Label>
               {settingTooltip("searchTopKHint")}

@@ -726,6 +726,7 @@ function normalizeNovelConfig(
     summaryModel: config.summaryModel ?? DEFAULT_NOVEL_CONFIG.summaryModel,
     extractModel: config.extractModel ?? DEFAULT_NOVEL_CONFIG.extractModel,
     deAiModel: config.deAiModel ?? DEFAULT_NOVEL_CONFIG.deAiModel,
+    deAiBatchConcurrency: Math.max(1, Math.min(5, Math.floor(config.deAiBatchConcurrency ?? DEFAULT_NOVEL_CONFIG.deAiBatchConcurrency))),
     communitySummaryEnabled: config.communitySummaryEnabled ?? DEFAULT_NOVEL_CONFIG.communitySummaryEnabled,
     communitySummaryInterval: Math.max(1, Math.min(50, config.communitySummaryInterval ?? DEFAULT_NOVEL_CONFIG.communitySummaryInterval)),
     communitySummaryAsync: config.communitySummaryAsync ?? DEFAULT_NOVEL_CONFIG.communitySummaryAsync,

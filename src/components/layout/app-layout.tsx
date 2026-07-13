@@ -10,6 +10,7 @@ import { ErrorBoundary } from "@/components/error-boundary"
 import { clampSidebarWidth } from "@/lib/workspace-layout"
 import { useTranslation } from "react-i18next"
 import { HelpCircle, X } from "lucide-react"
+import { DeAiBatchWorkspace } from "@/components/novel/de-ai-batch-workspace"
 
 const USAGE_GUIDE_PROMPT_DISMISSED_KEY = "qmai-usage-guide-prompt-dismissed"
 
@@ -144,6 +145,7 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
+      <DeAiBatchWorkspace />
       {/* 拆书分析后台任务通知 */}
       {latestBookAnalysisTask && (
         <div className="fixed bottom-3 right-3 z-50 w-80 rounded-lg border bg-background p-3 shadow-lg">
