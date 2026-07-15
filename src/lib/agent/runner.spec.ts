@@ -111,6 +111,34 @@ describe("AgentRunner", () => {
     expect(mockStreamChat.mock.calls[0][1][0]).toEqual(cacheableSystem)
   })
 
+  it("aggregates provider usage across agent rounds", async () => {
+    let round = 0
+    mockStreamChat.mockImplementation(async (_config: unknown, _msgs: unknown[], cb: StreamCallbacks) => {
+      round += 1
+      if (round === 1) {
+        cb.onUsage?.({ inputTokens: 1000, outputTokens: 20, cachedInputTokens: 600 })
+        cb.onToolCallDelta?.({ index: 0, id: "call_1", name: "missing_tool", arguments: "{}" })
+      } else {
+        cb.onUsage?.({ inputTokens: 700, outputTokens: 80, cachedInputTokens: 500 })
+        cb.onToken("完成")
+      }
+      cb.onDone()
+    })
+
+    const result = await runner.run(
+      { maxRounds: 2, tools: [], systemPrompt: "", llmConfig: mockLlmConfig },
+      registry,
+      [systemMsg, userMsg],
+      { onText: vi.fn(), onToolCall: vi.fn(), onToolResult: vi.fn(), onToolError: vi.fn(), onDone: vi.fn(), onError: vi.fn() },
+    )
+
+    expect(result.usage).toEqual({
+      inputTokens: 1700,
+      outputTokens: 100,
+      cachedInputTokens: 1100,
+    })
+  })
+
   it("executes tool calls and continues the loop", async () => {
     const tool: Tool = {
       name: "read_chapter",

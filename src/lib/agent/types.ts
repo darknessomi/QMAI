@@ -1,5 +1,6 @@
 import type { LlmConfig } from "@/stores/wiki-store"
 import type { ChatMessage, RequestOverrides } from "../llm-providers"
+import type { LlmUsage } from "../llm-usage"
 
 export interface ToolParameter {
   type: "string" | "number" | "boolean" | "object" | "array" | "integer"
@@ -153,6 +154,7 @@ export interface AgentRunRecord {
   }[]
   roundsUsed: number
   finalText: string
+  usage?: LlmUsage
 }
 
 export const DEFAULT_MAX_ROUNDS = 15

@@ -6,6 +6,7 @@ export {
   selectContextHistoryMessages,
 } from "./session-summary"
 export { buildContextHubSystemContent, flattenContextHubSystemContent } from "./prompt-content"
+export { applyProviderUsageToStats, persistContextHubProviderUsage } from "./provider-usage"
 export type {
   ContextHub,
   ContextHubRequest,

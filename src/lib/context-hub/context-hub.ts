@@ -50,21 +50,14 @@ type BuildContextPack = (
   options?: { categories?: DataSourceCategory[]; loadAdapter?: DataSourceLoadAdapter },
 ) => Promise<ContextPack>
 
+const STABLE_SOURCE_KINDS: ContextSourceKind[] = ["soul", "setting", "entity", "outline"]
+
 export interface ContextHubControllerDependencies {
   registry?: HubRegistry
   storage?: HubStorage
   buildContextPack?: BuildContextPack
   readFile?: (path: string) => Promise<string>
   subscribe?: (listener: (event: ProjectFileMutation) => void) => () => void
-}
-
-function dependenciesMatch(
-  left: Record<string, number>,
-  right: Record<string, number>,
-): boolean {
-  const entries = Object.entries(left)
-  return entries.length === Object.keys(right).length
-    && entries.every(([path, revision]) => right[path] === revision)
 }
 
 function confidenceFor(request: ContextHubRequest, pack: ContextPack): number {
@@ -215,6 +208,7 @@ export class ContextHubController implements ContextHub {
     const refresh = await this.registry.refresh()
     for (const path of refresh.changedPaths) this.fileCache.delete(normalizeContextPath(path))
     const dependencies = this.registry.getDependencies()
+    const stableDependencies = this.registry.getDependencies(STABLE_SOURCE_KINDS)
     const warnings: string[] = []
     const cacheAdapter = new DataSourceCacheAdapter({
       registry: this.registry,
@@ -253,21 +247,20 @@ export class ContextHubController implements ContextHub {
       if (
         existing
         && existing.text === composed.stableCore
-        && dependenciesMatch(existing.dependencies, dependencies)
       ) {
         stableHits = 1
         cacheItems.push({
           key: `stable-core:${request.surface}`,
           sourceName: "stableCore",
           status: "hit",
-          dependencyPaths: Object.keys(dependencies),
+          dependencyPaths: Object.keys(stableDependencies),
         })
       } else {
         await this.storage.writeStableBundle(request.surface, {
           schemaVersion: CONTEXT_CACHE_SCHEMA_VERSION,
           surface: request.surface,
           text: composed.stableCore,
-          dependencies,
+          dependencies: stableDependencies,
           updatedAt: Date.now(),
         })
         stableRefreshes = 1
@@ -275,7 +268,7 @@ export class ContextHubController implements ContextHub {
           key: `stable-core:${request.surface}`,
           sourceName: "stableCore",
           status: "refreshed",
-          dependencyPaths: Object.keys(dependencies),
+          dependencyPaths: Object.keys(stableDependencies),
         })
       }
     } catch {
@@ -284,7 +277,7 @@ export class ContextHubController implements ContextHub {
         key: `stable-core:${request.surface}`,
         sourceName: "stableCore",
         status: "failed",
-        dependencyPaths: Object.keys(dependencies),
+        dependencyPaths: Object.keys(stableDependencies),
       })
       warnings.push("稳定上下文缓存写入失败，本轮已继续使用内存中的最新内容。")
     }

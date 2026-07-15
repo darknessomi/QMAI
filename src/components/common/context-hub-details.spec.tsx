@@ -23,6 +23,10 @@ const snapshot: ContextHubSnapshot = {
     estimatedSavedPercent: 44,
     expanded: false,
     providerCacheEnabled: true,
+    providerUsageReported: true,
+    providerInputTokens: 1600,
+    providerCachedTokens: 800,
+    providerCacheWriteTokens: 200,
   },
   items: [
     {
@@ -93,6 +97,8 @@ describe("ContextHubDetails", () => {
     expect(host.textContent).toContain("稳定核心缓存")
     expect(host.textContent).toContain("wiki/outlines/main.md")
     expect(host.textContent).toContain("稳定核心正文")
+    expect(host.textContent).toContain("供应商已确认命中 800 Token（输入占比 50%）")
+    expect(host.textContent).toContain("供应商新写入缓存 200 Token")
     expect(host.innerHTML).toContain("max-h-96")
     expect(host.innerHTML).toContain("overflow-y-auto")
 

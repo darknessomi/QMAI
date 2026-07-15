@@ -40,7 +40,7 @@ import {
 } from "@/lib/novel/classification"
 import { cn } from "@/lib/utils"
 import { ToolCallTimeline } from "./tool-call-timeline"
-import { ContextHubDetails } from "@/components/common/context-hub-details"
+import { ContextHubDetails, ProviderCacheUsage } from "@/components/common/context-hub-details"
 import type { ContextHubSnapshotRef } from "@/lib/context-hub/types"
 
 interface RebuildRetrievalResult {
@@ -440,7 +440,7 @@ function OverviewTab({
             </div>
             <div className="ml-9 space-y-1 text-[11px] text-muted-foreground">
               <div>
-                本地缓存：命中 {contextInfo.contextHub.hits.toLocaleString()}，刷新 {contextInfo.contextHub.refreshed.toLocaleString()}，失败 {contextInfo.contextHub.failures.toLocaleString()}
+                本轮缓存事件：命中 {contextInfo.contextHub.hits.toLocaleString()}，刷新 {contextInfo.contextHub.refreshed.toLocaleString()}，失败 {contextInfo.contextHub.failures.toLocaleString()}
               </div>
               <div className="flex flex-wrap gap-x-3 gap-y-1">
                 <span>稳定核心 {contextInfo.contextHub.stableTokens.toLocaleString()} Token</span>
@@ -448,18 +448,12 @@ function OverviewTab({
                 <span>动态片段 {contextInfo.contextHub.dynamicTokens.toLocaleString()} Token</span>
               </div>
               <div>
-                项目资料预计节省 {contextInfo.contextHub.estimatedSavedTokens.toLocaleString()} Token（{contextInfo.contextHub.estimatedSavedPercent}%）
+                上下文压缩预计减少 {contextInfo.contextHub.estimatedSavedTokens.toLocaleString()} Token（{contextInfo.contextHub.estimatedSavedPercent}%）
               </div>
               <div>
                 低置信度扩展：{contextInfo.contextHub.expanded ? "已启用" : "未启用"}
               </div>
-              {contextInfo.contextHub.providerCachedTokens != null ? (
-                <div className="font-medium text-green-600 dark:text-green-400">
-                  供应商已确认命中 {contextInfo.contextHub.providerCachedTokens.toLocaleString()} Token
-                </div>
-              ) : contextInfo.contextHub.providerCacheEnabled ? (
-                <div>已启用稳定前缀缓存</div>
-              ) : null}
+              <ProviderCacheUsage stats={contextInfo.contextHub} />
             </div>
           </div>
         </>

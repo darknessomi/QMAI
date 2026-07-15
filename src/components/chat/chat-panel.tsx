@@ -122,6 +122,7 @@ import {
   buildSessionContextSummary,
   flattenContextHubSystemContent,
   getContextHub,
+  persistContextHubProviderUsage,
   selectContextHistoryMessages,
   type ContextHubResult,
   type ContextIntent,
@@ -1739,6 +1740,24 @@ export function ChatPanel() {
 
         if (controller.signal.aborted) return
         if (!streamSessionGuardRef.current.isActive(capturedConvId, sessionId)) return
+        if (contextHubResult && record.usage) {
+          try {
+            const contextHubSnapshot = await persistContextHubProviderUsage(
+              getContextHub(pp),
+              assistantMessage.id,
+              contextHubResult,
+              record.usage,
+            )
+            if (contextHubSnapshot) {
+              updateAgentAssistantMessage(assistantMessage.id, (message) => ({
+                ...message,
+                contextHubSnapshot,
+              }))
+            }
+          } catch (error) {
+            console.warn("供应商缓存用量快照保存失败，继续保留本地缓存统计：", error)
+          }
+        }
         finishAgentSession(() => {
           if (!hasAgentError) {
             if (contextTrace && effectiveTaskRoute) {

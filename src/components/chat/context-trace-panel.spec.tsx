@@ -40,12 +40,12 @@ describe("ContextTracePanel selected skills", () => {
 
     expect(html).toContain("上下文中控")
     expect(html).not.toContain("4ms")
-    expect(html).toContain("本地缓存：命中 4，刷新 1，失败 0")
+    expect(html).toContain("本轮缓存事件：命中 4，刷新 1，失败 0")
     expect(html).toContain("稳定核心 1,200 Token")
     expect(html).toContain("会话摘要 180 Token")
     expect(html).toContain("动态片段 420 Token")
-    expect(html).toContain("项目资料预计节省 1,400 Token（44%）")
-    expect(html).toContain("已启用稳定前缀缓存")
+    expect(html).toContain("上下文压缩预计减少 1,400 Token（44%）")
+    expect(html).toContain("已发送稳定前缀，是否命中以供应商返回为准")
     expect(html).not.toContain("供应商已确认命中")
   })
 
@@ -76,7 +76,10 @@ describe("ContextTracePanel selected skills", () => {
           estimatedSavedPercent: 33,
           expanded: true,
           providerCacheEnabled: true,
+          providerUsageReported: true,
+          providerInputTokens: 1536,
           providerCachedTokens: 768,
+          providerCacheWriteTokens: 256,
         },
       },
     }
@@ -84,7 +87,8 @@ describe("ContextTracePanel selected skills", () => {
     const html = renderToStaticMarkup(<ContextTracePanel trace={trace} />)
 
     expect(html).toContain("低置信度扩展：已启用")
-    expect(html).toContain("供应商已确认命中 768 Token")
+    expect(html).toContain("供应商已确认命中 768 Token（输入占比 50%）")
+    expect(html).toContain("供应商新写入缓存 256 Token")
   })
 
   it("uses the shared cache viewer when a persisted snapshot reference exists", () => {
@@ -127,7 +131,7 @@ describe("ContextTracePanel selected skills", () => {
     )
 
     expect(html).toContain("展开上下文中控")
-    expect(html).toContain("本地缓存：命中 2，刷新 1，失败 0")
+    expect(html).toContain("本轮缓存事件：命中 2，刷新 1，失败 0")
   })
 
   it("renders web search trace entries in the overview", () => {

@@ -26,6 +26,8 @@ describe("AI chat context hub integration", () => {
 
   it("persists a snapshot reference on the target assistant message", () => {
     expect(source).toContain("await contextHub.saveSnapshot(assistantMessage.id, contextHubResult)")
+    expect(source).toContain("persistContextHubProviderUsage(")
+    expect(source).toContain("record.usage")
     expect(source).toContain("contextHubSnapshot")
   })
 

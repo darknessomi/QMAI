@@ -5,6 +5,7 @@ import {
   isAzureOpenAiEndpoint,
 } from "@/lib/azure-openai"
 import { normalizeEndpoint } from "@/lib/endpoint-normalizer"
+import type { LlmUsage } from "./llm-usage"
 
 /**
  * One piece of a multimodal message body. Text + image is the only
@@ -77,6 +78,7 @@ interface ProviderConfig {
   headers: Record<string, string>
   buildBody: (messages: ChatMessage[], overrides?: RequestOverrides) => unknown
   parseStream: (line: string) => string | null
+  parseUsage: (line: string) => LlmUsage | null
 }
 
 const JSON_CONTENT_TYPE = "application/json"
@@ -181,6 +183,52 @@ function parseOpenAiLine(line: string): string | null {
   }
 }
 
+function tokenCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined
+}
+
+function usageOrNull(usage: LlmUsage): LlmUsage | null {
+  return Object.values(usage).some((value) => value !== undefined) ? usage : null
+}
+
+function parseOpenAiUsage(line: string): LlmUsage | null {
+  if (!line.startsWith("data: ")) return null
+  const data = line.slice(6).trim()
+  if (data === "[DONE]") return null
+  try {
+    const parsed = JSON.parse(data) as {
+      usage?: {
+        prompt_tokens?: number
+        completion_tokens?: number
+        total_tokens?: number
+        cached_tokens?: number
+        prompt_cache_hit_tokens?: number
+        cache_read_input_tokens?: number
+        cache_creation_input_tokens?: number
+        prompt_tokens_details?: { cached_tokens?: number }
+        input_tokens_details?: { cached_tokens?: number }
+      }
+    }
+    const raw = parsed.usage
+    if (!raw) return null
+    return usageOrNull({
+      inputTokens: tokenCount(raw.prompt_tokens),
+      outputTokens: tokenCount(raw.completion_tokens),
+      totalTokens: tokenCount(raw.total_tokens),
+      cachedInputTokens: tokenCount(raw.prompt_tokens_details?.cached_tokens)
+        ?? tokenCount(raw.input_tokens_details?.cached_tokens)
+        ?? tokenCount(raw.cached_tokens)
+        ?? tokenCount(raw.prompt_cache_hit_tokens)
+        ?? tokenCount(raw.cache_read_input_tokens),
+      cacheWriteInputTokens: tokenCount(raw.cache_creation_input_tokens),
+    })
+  } catch {
+    return null
+  }
+}
+
 function parseResponsesLine(line: string): string | null {
   if (!line.startsWith("data: ")) return null
   const data = line.slice(6).trim()
@@ -191,6 +239,34 @@ function parseResponsesLine(line: string): string | null {
       return parsed.delta ?? null
     }
     return null
+  } catch {
+    return null
+  }
+}
+
+function parseResponsesUsage(line: string): LlmUsage | null {
+  if (!line.startsWith("data: ")) return null
+  const data = line.slice(6).trim()
+  if (data === "[DONE]") return null
+  try {
+    const parsed = JSON.parse(data) as {
+      response?: {
+        usage?: {
+          input_tokens?: number
+          output_tokens?: number
+          total_tokens?: number
+          input_tokens_details?: { cached_tokens?: number }
+        }
+      }
+    }
+    const raw = parsed.response?.usage
+    if (!raw) return null
+    return usageOrNull({
+      inputTokens: tokenCount(raw.input_tokens),
+      outputTokens: tokenCount(raw.output_tokens),
+      totalTokens: tokenCount(raw.total_tokens),
+      cachedInputTokens: tokenCount(raw.input_tokens_details?.cached_tokens),
+    })
   } catch {
     return null
   }
@@ -211,6 +287,33 @@ function parseAnthropicLine(line: string): string | null {
       return parsed.delta.text ?? null
     }
     return null
+  } catch {
+    return null
+  }
+}
+
+function parseAnthropicUsage(line: string): LlmUsage | null {
+  if (!line.startsWith("data: ")) return null
+  const data = line.slice(6).trim()
+  try {
+    const parsed = JSON.parse(data) as {
+      message?: { usage?: Record<string, unknown> }
+      usage?: Record<string, unknown>
+    }
+    const raw = parsed.message?.usage ?? parsed.usage
+    if (!raw) return null
+    const directInput = tokenCount(raw.input_tokens)
+    const cacheRead = tokenCount(raw.cache_read_input_tokens)
+    const cacheWrite = tokenCount(raw.cache_creation_input_tokens)
+    const hasInput = directInput !== undefined || cacheRead !== undefined || cacheWrite !== undefined
+    return usageOrNull({
+      inputTokens: hasInput
+        ? (directInput ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
+        : undefined,
+      outputTokens: tokenCount(raw.output_tokens),
+      cachedInputTokens: cacheRead,
+      cacheWriteInputTokens: cacheWrite,
+    })
   } catch {
     return null
   }
@@ -240,6 +343,31 @@ export function parseGoogleLine(line: string): string | null {
       if (p.text) out += p.text
     }
     return out.length > 0 ? out : null
+  } catch {
+    return null
+  }
+}
+
+function parseGoogleUsage(line: string): LlmUsage | null {
+  if (!line.startsWith("data: ")) return null
+  const data = line.slice(6).trim()
+  try {
+    const parsed = JSON.parse(data) as {
+      usageMetadata?: {
+        promptTokenCount?: number
+        candidatesTokenCount?: number
+        totalTokenCount?: number
+        cachedContentTokenCount?: number
+      }
+    }
+    const raw = parsed.usageMetadata
+    if (!raw) return null
+    return usageOrNull({
+      inputTokens: tokenCount(raw.promptTokenCount),
+      outputTokens: tokenCount(raw.candidatesTokenCount),
+      totalTokens: tokenCount(raw.totalTokenCount),
+      cachedInputTokens: tokenCount(raw.cachedContentTokenCount),
+    })
   } catch {
     return null
   }
@@ -420,6 +548,13 @@ function buildOpenAiCompatibleBody(
 ): Record<string, unknown> {
   const reasoning = effectiveReasoning(config, overrides)
   const body: Record<string, unknown> = buildOpenAiBody(messages, stripWireAgnosticOverrides(overrides))
+  if (
+    config.provider === "openai"
+    || config.provider === "azure"
+    || (config.provider === "custom" && isAzureOpenAiEndpoint(config.customEndpoint))
+  ) {
+    body.stream_options = { include_usage: true }
+  }
   adaptOpenAiStrictCompletionBody(config, body)
   adaptKimiBody(config, body)
 
@@ -745,6 +880,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           model,
         }),
         parseStream: parseOpenAiLine,
+        parseUsage: parseOpenAiUsage,
       }
 
     case "anthropic": {
@@ -757,6 +893,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           model,
         }),
         parseStream: parseAnthropicLine,
+        parseUsage: parseAnthropicUsage,
       }
     }
 
@@ -777,6 +914,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           reasoning: effectiveReasoning(config, overrides),
         }),
         parseStream: parseGoogleLine,
+        parseUsage: parseGoogleUsage,
       }
     }
 
@@ -794,6 +932,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
         buildBody: (messages, overrides) =>
           buildOpenAiCompatibleBody(config, messages, overrides),
         parseStream: parseOpenAiLine,
+        parseUsage: parseOpenAiUsage,
       }
     }
 
@@ -819,6 +958,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           model,
         }),
         parseStream: parseOpenAiLine,
+        parseUsage: parseOpenAiUsage,
       }
     }
 
@@ -837,6 +977,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           model,
         }),
         parseStream: parseAnthropicLine,
+        parseUsage: parseAnthropicUsage,
       }
     }
 
@@ -866,6 +1007,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
             model,
           }),
           parseStream: parseAnthropicLine,
+          parseUsage: parseAnthropicUsage,
         }
       }
       if (mode === "responses") {
@@ -878,6 +1020,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           headers: getCustomCompatibleHeaders(apiKey, url),
           buildBody: (messages, overrides) => buildResponsesBody(config, messages, overrides),
           parseStream: parseResponsesLine,
+          parseUsage: parseResponsesUsage,
         }
       }
       // Defense-in-depth: settings-side EndpointField normalizes URLs on
@@ -912,6 +1055,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           return body
         },
         parseStream: parseOpenAiLine,
+        parseUsage: parseOpenAiUsage,
       }
     }
 

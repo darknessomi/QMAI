@@ -15,6 +15,7 @@ import {
 } from "./task-breakpoint"
 import type { ChatMessage } from "../llm-providers"
 import { isReasoningDisabled, isReasoningOnlyResponseError, withReasoningDisabled } from "../reasoning-retry"
+import { addLlmUsage } from "../llm-usage"
 
 export class ModelDoesNotSupportToolsError extends Error {
   constructor() {
@@ -118,6 +119,9 @@ export class AgentRunner {
         },
         onToolCallDelta: (delta: ToolCallDelta) => {
           toolCallDeltas.push(delta)
+        },
+        onUsage: (usage) => {
+          record.usage = addLlmUsage(record.usage, usage)
         },
         onDone: () => {
           // stream finished

@@ -7,6 +7,27 @@ export interface ChangelogEntry {
   };
 }
 
+const TWO_POINT_TWO_THIRTY_SEVEN_CHANGELOG: ChangelogEntry = {
+  version: "2.2.37",
+  date: "2026-07-15",
+  highlights: {
+    en: [
+      "AI Chat and AI Outline now read real provider cache usage from OpenAI, Anthropic, Gemini, and Responses API results.",
+      "Provider usage is aggregated across Agent tool rounds, retries, and parallel outline agents, then stored in the current context snapshot.",
+      "Cache hit, refresh, and failure values are now labeled as per-request cache events, while estimated Token savings are explicitly identified as context compression estimates.",
+      "Stable context cores now remain reusable whenever their final prefix bytes are unchanged, avoiding false refreshes caused only by unrelated source revisions.",
+      "The interface reports confirmed cache hits only when the provider returns cache details, and otherwise states that a stable prefix was sent for provider-side reuse.",
+    ],
+    zh: [
+      "AI 对话与 AI 大纲现已读取 OpenAI、Anthropic、Gemini 和 Responses API 返回的供应商真实缓存用量。",
+      "Agent 工具轮次、失败重试和大纲多 Agent 调用会统一累计供应商用量，并写入当前上下文快照。",
+      "命中、刷新和失败明确显示为本轮缓存事件；预计节省 Token 明确标注为上下文压缩预计减少。",
+      "稳定核心在最终前缀字节不变时继续复用，避免仅因无关资料修订而错误刷新。",
+      "只有供应商返回缓存明细时才显示确认命中；否则明确提示已发送稳定前缀，最终以供应商返回为准。",
+    ],
+  },
+};
+
 const TWO_POINT_TWO_THIRTY_SIX_CHANGELOG: ChangelogEntry = {
   version: "2.2.36",
   date: "2026-07-15",
@@ -844,6 +865,8 @@ export const CHANGELOG: ChangelogEntry[] = [
 ];
 
 export function currentVersionChangelog(version: string): ChangelogEntry[] {
+  if (version === TWO_POINT_TWO_THIRTY_SEVEN_CHANGELOG.version)
+    return [TWO_POINT_TWO_THIRTY_SEVEN_CHANGELOG];
   if (version === TWO_POINT_TWO_THIRTY_SIX_CHANGELOG.version)
     return [TWO_POINT_TWO_THIRTY_SIX_CHANGELOG];
   if (version === TWO_POINT_TWO_THIRTY_FIVE_CHANGELOG.version)
@@ -913,6 +936,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    TWO_POINT_TWO_THIRTY_SEVEN_CHANGELOG,
     TWO_POINT_TWO_THIRTY_SIX_CHANGELOG,
     TWO_POINT_TWO_THIRTY_FIVE_CHANGELOG,
     TWO_POINT_TWO_THIRTY_THREE_CHANGELOG,

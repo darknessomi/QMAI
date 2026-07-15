@@ -26,6 +26,8 @@ describe("AI outline context hub integration", () => {
 
   it("persists snapshots for main send, resume, and regeneration", () => {
     expect(source.match(/\.saveSnapshot\(/g)).toHaveLength(3)
+    expect(source.match(/persistContextHubProviderUsage\(/g)).toHaveLength(3)
+    expect(source).toContain("addLlmUsage(")
     expect(source).toContain("contextHubSnapshot")
     expect(source).toContain("<ContextHubDetails")
     expect(source).not.toContain("formatContextHubStatsForDetails")

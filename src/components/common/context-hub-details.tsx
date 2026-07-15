@@ -7,6 +7,7 @@ import type {
   ContextCacheItemTrace,
   ContextHubSnapshot,
   ContextHubSnapshotRef,
+  ContextHubStats,
 } from "@/lib/context-hub/types"
 
 type ContextSection = "stableCore" | "sessionSummary" | "dynamicContext"
@@ -88,6 +89,36 @@ function CacheItemGroup({ status, items }: { status: ContextCacheItemStatus; ite
   )
 }
 
+export function ProviderCacheUsage({ stats }: { stats: ContextHubStats }) {
+  const cachedTokens = stats.providerCachedTokens
+  const inputTokens = stats.providerInputTokens
+  const hitPercent = cachedTokens !== undefined && inputTokens !== undefined && inputTokens > 0
+    ? Math.min(100, Math.round((cachedTokens / inputTokens) * 100))
+    : null
+
+  return (
+    <>
+      {cachedTokens !== undefined ? (
+        cachedTokens > 0 ? (
+          <div className="font-medium text-green-600 dark:text-green-400">
+            供应商已确认命中 {cachedTokens.toLocaleString()} Token
+            {hitPercent !== null ? `（输入占比 ${hitPercent}%）` : ""}
+          </div>
+        ) : (
+          <div>供应商已确认本次未命中缓存（0 Token）</div>
+        )
+      ) : stats.providerUsageReported ? (
+        <div>供应商已返回 Token 用量，但未提供缓存命中明细</div>
+      ) : stats.providerCacheEnabled ? (
+        <div>已发送稳定前缀，是否命中以供应商返回为准</div>
+      ) : null}
+      {(stats.providerCacheWriteTokens ?? 0) > 0 && (
+        <div>供应商新写入缓存 {stats.providerCacheWriteTokens?.toLocaleString()} Token</div>
+      )}
+    </>
+  )
+}
+
 export function ContextHubDetails({
   reference,
   projectPath,
@@ -136,7 +167,7 @@ export function ContextHubDetails({
         <span className="min-w-0 flex-1">
           <span className="block text-xs font-medium text-foreground">上下文中控</span>
           <span className="mt-0.5 block text-[11px] text-muted-foreground">
-            本地缓存：命中 {stats.hits.toLocaleString()}，刷新 {stats.refreshed.toLocaleString()}，失败 {stats.failures.toLocaleString()}
+            本轮缓存事件：命中 {stats.hits.toLocaleString()}，刷新 {stats.refreshed.toLocaleString()}，失败 {stats.failures.toLocaleString()}
           </span>
           <span className="mt-0.5 block text-[11px] text-muted-foreground">
             稳定核心 {stats.stableTokens.toLocaleString()} Token　会话摘要 {stats.summaryTokens.toLocaleString()} Token　动态片段 {stats.dynamicTokens.toLocaleString()} Token
@@ -150,13 +181,9 @@ export function ContextHubDetails({
       {expanded && (
         <div className="ml-8 mt-2 min-w-0">
           <div className="mb-2 space-y-0.5 text-[11px] text-muted-foreground">
-            <div>项目资料预计节省 {stats.estimatedSavedTokens.toLocaleString()} Token（{stats.estimatedSavedPercent}%）</div>
+            <div>上下文压缩预计减少 {stats.estimatedSavedTokens.toLocaleString()} Token（{stats.estimatedSavedPercent}%）</div>
             <div>低置信度扩展：{stats.expanded ? "已启用" : "未启用"}</div>
-            {stats.providerCachedTokens != null
-              ? <div className="font-medium text-green-600 dark:text-green-400">供应商已确认命中 {stats.providerCachedTokens.toLocaleString()} Token</div>
-              : stats.providerCacheEnabled
-                ? <div>已启用稳定前缀缓存</div>
-                : null}
+            <ProviderCacheUsage stats={stats} />
           </div>
 
           {loading ? (

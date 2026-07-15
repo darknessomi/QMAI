@@ -5,15 +5,18 @@ import { getHttpFetch, isFetchNetworkError } from "./tauri-fetch"
 import { countReasoningCharsInLine, extractReasoningTextFromLine } from "./reasoning-detector"
 import { resolveRuntimeLocalCliConfig } from "./local-cli-config"
 import { trimChatMessagesToBudget } from "./chat-request-budget"
+import { mergeLlmUsageSnapshot, type LlmUsage } from "./llm-usage"
 
 export type { ChatMessage, RequestOverrides } from "./llm-providers"
 export { isFetchNetworkError } from "./tauri-fetch"
+export type { LlmUsage } from "./llm-usage"
 
 export interface StreamCallbacks {
   onToken: (token: string) => void
   onReasoningToken?: (token: string) => void
   /** 工具调用流式 delta，用于累积 tool_calls */
   onToolCallDelta?: (delta: { index: number; id?: string; name?: string; arguments?: string }) => void
+  onUsage?: (usage: LlmUsage) => void
   onDone: () => void
   onError: (error: Error) => void
 }
@@ -328,6 +331,12 @@ export async function streamChat(
 
     const reader = response.body.getReader()
     let lineBuffer = ""
+    let streamUsage: LlmUsage | undefined
+
+    const recordUsage = (line: string) => {
+      const usage = providerConfig.parseUsage(line)
+      if (usage) streamUsage = mergeLlmUsageSnapshot(streamUsage, usage)
+    }
 
     // Diagnostic counters. Some OpenAI-compatible endpoints stream
     // chain-of-thought through a `reasoning_content` (DeepSeek-R1,
@@ -360,6 +369,7 @@ export async function streamChat(
         if (done) {
           if (lineBuffer.trim()) {
             const trimmed = lineBuffer.trim()
+            recordUsage(trimmed)
             const toolDelta = parseToolCallDeltaFromLine(trimmed)
             if (toolDelta) {
               callbacks.onToolCallDelta?.(toolDelta)
@@ -379,6 +389,7 @@ export async function streamChat(
         for (const line of lines) {
           const trimmed = line.trim()
           if (!trimmed) continue
+          recordUsage(trimmed)
           const toolDelta = parseToolCallDeltaFromLine(trimmed)
           if (toolDelta) {
             callbacks.onToolCallDelta?.(toolDelta)
@@ -390,6 +401,8 @@ export async function streamChat(
           if (token !== null) recordToken(token)
         }
       }
+
+      if (streamUsage) callbacks.onUsage?.(streamUsage)
 
       // Stream ended cleanly. If the model produced thinking tokens
       // but no actual answer, surface that as a clear diagnostic

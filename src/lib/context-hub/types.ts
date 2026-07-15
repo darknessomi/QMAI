@@ -67,7 +67,10 @@ export interface ContextHubStats {
   estimatedSavedPercent: number
   expanded: boolean
   providerCacheEnabled: boolean
+  providerUsageReported?: boolean
+  providerInputTokens?: number
   providerCachedTokens?: number
+  providerCacheWriteTokens?: number
 }
 
 export type ContextCacheItemStatus = "hit" | "refreshed" | "failed"

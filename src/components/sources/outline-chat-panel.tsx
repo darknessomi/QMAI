@@ -174,9 +174,11 @@ import {
   buildSessionContextSummary,
   flattenContextHubSystemContent,
   getContextHub,
+  persistContextHubProviderUsage,
   type ContextHubResult,
   type ContextHubSnapshotRef,
 } from "@/lib/context-hub";
+import { addLlmUsage, type LlmUsage } from "@/lib/llm-usage";
 import {
   getConversationTabTitle,
   splitConversationToolbarItems,
@@ -1865,6 +1867,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       let hiddenToolCalls: AgentRunRecord["toolCalls"] = [];
       let followUpGenerationPrompt: string | null = null;
       let contextHubResult: ContextHubResult | null = null;
+      let providerUsage: LlmUsage | undefined;
 
       try {
         const contextHub = getContextHub(normalizePath(project.path));
@@ -2063,6 +2066,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             },
             controller.signal,
           );
+          providerUsage = addLlmUsage(providerUsage, record.usage);
           allToolCalls.push(...record.toolCalls);
           if (agentError) throw agentError;
           return { text: runText || record.finalText, record };
@@ -2335,6 +2339,24 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         }
 
         if (!isCurrentRun()) return { started: true, sent: false };
+        if (contextHubResult && providerUsage) {
+          try {
+            const contextHubSnapshot = await persistContextHubProviderUsage(
+              getContextHub(normalizePath(project.path)),
+              assistantId,
+              contextHubResult,
+              providerUsage,
+            );
+            if (contextHubSnapshot && isCurrentRun()) {
+              updateOutlineAssistantMessage(convId, assistantId, (message) => ({
+                ...message,
+                contextHubSnapshot,
+              }));
+            }
+          } catch (error) {
+            console.warn("AI 大纲供应商缓存用量快照保存失败，继续保留本地缓存统计：", error);
+          }
+        }
 
         const finalSources = Array.from(
           new Set([
@@ -2674,6 +2696,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
 
       try {
         let contextHubResult: ContextHubResult | null = null;
+        let providerUsage: LlmUsage | undefined;
         try {
           const contextHub = getContextHub(normalizePath(project.path));
           contextHubResult = await contextHub.prepare({
@@ -2773,7 +2796,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             const { agentConfig, registry: reg } = buildConfig(subAgentPlan.skillNames, true);
             let runText = "";
             let agentError: Error | null = null;
-            await new AgentRunner().run(agentConfig, reg, [
+            const record = await new AgentRunner().run(agentConfig, reg, [
               { role: "system", content: buildResumeSystemContent(["## 子 Agent 运行规则", `当前身份：${subAgentPlan.name}`, "你只能处理本 Agent 负责的维度，禁止写入文件。", "必须输出符合 AI 大纲子 Agent JSON 协议的 JSON，不要输出额外说明。"].join("\n")) },
               { role: "user", content: subAgentPlan.taskPrompt },
             ], {
@@ -2785,6 +2808,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
               onDone: () => {},
               onError: (error) => { agentError = error; },
             }, controller.signal);
+            providerUsage = addLlmUsage(providerUsage, record.usage);
             if (agentError) throw agentError;
             return runText;
           },
@@ -2798,7 +2822,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             const { agentConfig, registry: reg } = buildConfig([], true);
             let mergeText = "";
             let mergeError: Error | null = null;
-            await new AgentRunner().run(agentConfig, reg, [
+            const record = await new AgentRunner().run(agentConfig, reg, [
               { role: "system", content: buildResumeSystemContent(["## 合并 Agent 运行规则", "你负责合并多个子 Agent 的结构化结果，形成最终可预览的大纲草稿。", "输出必须是用户可直接阅读和保存的大纲正文，不要输出内部调度报告。"].join("\n")) },
               { role: "user", content: ["请合并以下 AI 大纲子 Agent 结果，解决冲突并输出最终大纲草稿。", "", "## 子 Agent 结构化结果", JSON.stringify(subAgentResults, null, 2)].join("\n") },
             ], {
@@ -2813,6 +2837,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
               onDone: () => {},
               onError: (error) => { mergeError = error; },
             }, controller.signal);
+            providerUsage = addLlmUsage(providerUsage, record.usage);
             if (mergeError) throw mergeError;
             return mergeText || "AI大纲未返回内容。";
           },
@@ -2830,6 +2855,25 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         });
 
         if (!isCurrentRun()) return;
+
+        if (contextHubResult && providerUsage) {
+          try {
+            const contextHubSnapshot = await persistContextHubProviderUsage(
+              getContextHub(normalizePath(project.path)),
+              `${messageId}:${runId}`,
+              contextHubResult,
+              providerUsage,
+            );
+            if (contextHubSnapshot && isCurrentRun()) {
+              updateOutlineAssistantMessage(capturedConvId, messageId, (message) => ({
+                ...message,
+                contextHubSnapshot,
+              }));
+            }
+          } catch (error) {
+            console.warn("AI 大纲续传供应商缓存用量快照保存失败，继续保留本地缓存统计：", error);
+          }
+        }
 
         // 更新最终状态
         updateOutlineMultiAgentRun(capturedConvId, messageId, (run) => {
@@ -3160,6 +3204,24 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         );
         if (agentError) throw agentError;
         if (!isCurrentRun()) return;
+        if (contextHubResult && record.usage) {
+          try {
+            const updatedSnapshot = await persistContextHubProviderUsage(
+              getContextHub(normalizePath(project.path)),
+              assistantId,
+              contextHubResult,
+              record.usage,
+            );
+            if (updatedSnapshot && isCurrentRun()) {
+              updateOutlineAssistantMessage(capturedConvId, assistantId, (message) => ({
+                ...message,
+                contextHubSnapshot: updatedSnapshot,
+              }));
+            }
+          } catch (error) {
+            console.warn("AI 大纲重新生成供应商缓存用量快照保存失败，继续保留本地缓存统计：", error);
+          }
+        }
 
         const sources = [
           ...outlineToolCallsToSources(record.toolCalls),

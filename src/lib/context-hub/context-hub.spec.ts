@@ -140,6 +140,46 @@ describe("ContextHubController", () => {
     ])
   })
 
+  it("keeps the stable core cached when only an unrelated chapter changes", async () => {
+    const harness = createHarness()
+    let chapterRevision = 1
+    harness.registry.getDependencies.mockImplementation((kinds?: string[]) => (
+      kinds
+        ? { "E:/Novel/wiki/outlines/main.md": 1 }
+        : {
+            "E:/Novel/wiki/outlines/main.md": 1,
+            "E:/Novel/wiki/chapters/chapter-1.md": chapterRevision,
+          }
+    ))
+
+    await harness.controller.prepare(request)
+    chapterRevision = 2
+    const second = await harness.controller.prepare({ ...request, task: "继续生成大纲" })
+
+    expect(second?.cacheItems).toContainEqual(expect.objectContaining({
+      sourceName: "stableCore",
+      status: "hit",
+      dependencyPaths: ["wiki/outlines/main.md"],
+    }))
+  })
+
+  it("keeps the stable core cached when source revisions change but its bytes stay identical", async () => {
+    const harness = createHarness()
+    let outlineRevision = 1
+    harness.registry.getDependencies.mockImplementation(() => ({
+      "E:/Novel/wiki/outlines/main.md": outlineRevision,
+    }))
+
+    await harness.controller.prepare(request)
+    outlineRevision = 2
+    const second = await harness.controller.prepare({ ...request, task: "继续生成大纲" })
+
+    expect(second?.cacheItems).toContainEqual(expect.objectContaining({
+      sourceName: "stableCore",
+      status: "hit",
+    }))
+  })
+
   it("removes a Windows project root from dependency paths case-insensitively", async () => {
     const harness = createHarness()
     harness.registry.getDependencies.mockReturnValue({

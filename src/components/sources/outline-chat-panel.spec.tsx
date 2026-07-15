@@ -148,7 +148,7 @@ describe("OutlineChatPanel controls", () => {
     const container = await renderOutlineChatPanel()
 
     expect(container.textContent).toContain("上下文中控")
-    expect(container.textContent).toContain("本地缓存：命中 3，刷新 2，失败 0")
+    expect(container.textContent).toContain("本轮缓存事件：命中 3，刷新 2，失败 0")
   })
 
   it.each([

@@ -90,4 +90,31 @@ describe("composeContext", () => {
 
     expect(result.stats.estimatedSavedPercent).toBeGreaterThanOrEqual(30)
   })
+
+  it("compares trimmed context with the same summary and references", () => {
+    const input = {
+      contextPack: pack({
+        recentChapterContents: ["章节原文".repeat(1000)],
+        searchResults: "低优先级检索".repeat(100),
+      }),
+      dependencies: {},
+      confidence: 0.9,
+      tokenBudget: 100_000,
+    }
+    const base = composeContext(input)
+    const supplemented = composeContext({
+      ...input,
+      sessionSummary: "会话摘要".repeat(100),
+      referenceContext: ["显式引用".repeat(100)],
+    })
+    const baseComposed = base.stats.stableTokens + base.stats.summaryTokens + base.stats.dynamicTokens
+    const supplementedComposed = supplemented.stats.stableTokens
+      + supplemented.stats.summaryTokens
+      + supplemented.stats.dynamicTokens
+
+    expect(base.stats.estimatedSavedTokens).toBeGreaterThan(0)
+    expect(supplemented.stats.estimatedSavedTokens).toBe(base.stats.estimatedSavedTokens)
+    expect(supplemented.stats.candidateTokens - base.stats.candidateTokens)
+      .toBe(supplementedComposed - baseComposed)
+  })
 })

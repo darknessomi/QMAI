@@ -46,15 +46,18 @@ function stableFragments(pack: ContextPack): ContextFragment[] {
   ]
 }
 
-function dynamicFragments(input: ComposeContextInput, expanded: boolean): ContextFragment[] {
-  const pack = input.contextPack
-  const references = (input.referenceContext ?? []).map((value, index) => ({
+function referenceFragments(input: ComposeContextInput): ContextFragment[] {
+  return (input.referenceContext ?? []).map((value, index) => ({
     title: `显式引用 ${index + 1}`,
     text: value,
     required: true,
   }))
+}
+
+function dynamicFragments(input: ComposeContextInput, expanded: boolean): ContextFragment[] {
+  const pack = input.contextPack
   const required: ContextFragment[] = [
-    ...references,
+    ...referenceFragments(input),
     { title: "本轮任务", text: pack.task, required: true },
     { title: "章节目标", text: pack.chapterGoal, required: true },
     { title: "必须做到", text: pack.mustDo, required: true },
@@ -108,11 +111,14 @@ export function composeContext(input: ComposeContextInput): ComposedContext {
   const stableTokens = estimateContextTokens(stableCore)
   const summaryTokens = estimateContextTokens(sessionSummary)
   const availableDynamicTokens = Math.max(0, tokenBudget - stableTokens - summaryTokens)
+  const dynamicFragmentsForRequest = dynamicFragments(input, expanded)
   const dynamicContext = joinSections(
-    applyBudget(dynamicFragments(input, expanded), availableDynamicTokens),
+    applyBudget(dynamicFragmentsForRequest, availableDynamicTokens),
   )
   const dynamicTokens = estimateContextTokens(dynamicContext)
   const candidateTokens = estimateContextTokens(contextPackToPrompt(input.contextPack))
+    + summaryTokens
+    + estimateContextTokens(joinSections(referenceFragments(input)))
   const composedTokens = stableTokens + summaryTokens + dynamicTokens
   const estimatedSavedTokens = Math.max(0, candidateTokens - composedTokens)
   const estimatedSavedPercent = candidateTokens > 0
