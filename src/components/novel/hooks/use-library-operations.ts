@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react"
 import { useBookAnalysisStore } from "@/stores/book-analysis-store"
+import { useBookAnalysisImportStore } from "@/stores/book-analysis-import-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { analyzeWritingStyle } from "@/lib/novel/book-analysis/style-extraction-engine"
 import { importBookAnalysisSkillsAsAuras } from "@/lib/novel/book-analysis/aura-adapter"
@@ -12,8 +13,8 @@ import {
 import { bindCharacterAura, listBindableNovelCharacters } from "@/lib/novel/character-aura"
 import { setEnabledWritingStyle, upsertWritingStylePreset } from "@/lib/novel/writing-style-store"
 import { refreshProjectState } from "@/lib/project-refresh"
-import { readFile, listDirectory, deleteFile } from "@/commands/fs"
-import { joinPath } from "@/lib/path-utils"
+import { readFile, listDirectory } from "@/commands/fs"
+import { joinPath, normalizePath } from "@/lib/path-utils"
 import { toast } from "@/lib/toast"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import type { AnalysisDepth } from "@/lib/novel/book-analysis/types"
@@ -53,6 +54,7 @@ export function useLibraryOperations({
 }: UseLibraryOperationsParams) {
   const [styleExtracting, setStyleExtracting] = useState(false)
   const [addingToSoul, setAddingToSoul] = useState(false)
+  const deletePublishedBook = useBookAnalysisImportStore((state) => state.deletePublishedBook)
 
   const reloadLibraryState = useCallback(async () => {
     if (!currentProjectPath) {
@@ -233,13 +235,19 @@ export function useLibraryOperations({
     const book = libraryState.books.find((item) => item.id === bookId)
     if (!book) return
     const confirmed = window.confirm(
-      `确认删除作品"${book.metadata.title}"吗？\n\n这将删除：\n- 所有角色信息\n- 所有生成的 Skills\n- 分析元数据\n\n此操作无法撤销。`,
+      `确认删除作品"${book.metadata.title}"吗？\n\n这将删除：\n- 所有角色信息\n- 所有生成的 Skills\n- 分析元数据\n- 导入历史和内容查重记录\n\n此操作无法撤销。`,
     )
     if (!confirmed) return
 
     try {
-      await deleteFile(book.path)
+      await deletePublishedBook(bookId)
       const cleaned = await deleteOrphanAurasForBook(currentProjectPath, book.metadata.title).catch(() => 0)
+      const activeProjectPath = useWikiStore.getState().project?.path
+      if (
+        !activeProjectPath
+        || normalizePath(activeProjectPath).replace(/\/+$/, "")
+          !== normalizePath(currentProjectPath).replace(/\/+$/, "")
+      ) return
       if (selectedBookId === bookId) {
         setSelectedBookId(null)
         setSelectedCharacterId(null)
@@ -252,9 +260,13 @@ export function useLibraryOperations({
       await reloadLibraryState()
     } catch (err) {
       console.error("Failed to delete book:", err)
-      toast.error("删除作品失败，请稍后重试")
+      toast.error(
+        err instanceof Error && err.message === "作品正在导入或重新生成，请先取消任务后再删除。"
+          ? err.message
+          : "删除作品失败，请稍后重试",
+      )
     }
-  }, [currentProjectPath, libraryState.books, setSelectedBookId, setSelectedCharacterId, reloadLibraryState])
+  }, [currentProjectPath, libraryState.books, deletePublishedBook, setSelectedBookId, setSelectedCharacterId, reloadLibraryState])
 
   const handleLibraryReextractCharacters = useCallback(async () => {
     if (!currentProjectPath || !selectedLibraryBook) return

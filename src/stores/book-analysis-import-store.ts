@@ -5,11 +5,13 @@ import {
   type BatchImportScheduler,
 } from "@/lib/novel/book-analysis/batch-import-scheduler"
 import { reserveUniqueTitle } from "@/lib/novel/book-analysis/batch-import-hash"
+import { deleteBookAnalysisBook } from "@/lib/novel/book-analysis/book-deletion"
 import {
   cacheTaskSource,
   deleteFailedBatchImportTask,
   loadBatchImportBatches,
   loadBatchImportTasks,
+  pruneMissingCompletedBookHistory,
   saveBatchImportBatch,
   saveBatchImportTask,
 } from "@/lib/novel/book-analysis/batch-import-storage"
@@ -20,11 +22,12 @@ import type {
 } from "@/lib/novel/book-analysis/batch-import-types"
 import {
   findBookLibraryEntryBySha256,
-  loadBookLibrary,
   renameBookLibraryEntry,
+  reconcileBookLibrary,
 } from "@/lib/novel/book-analysis/library-store"
 
 const OPEN_PANEL_STATUSES = new Set(["queued", "copying", "splitting", "interrupted", "failed"])
+const DELETE_BLOCKING_STATUSES = new Set(["queued", "copying", "splitting"])
 const SWITCHED_PROJECT_ERROR = "项目已切换，导入任务已中断"
 let idCounter = 0
 
@@ -79,6 +82,7 @@ export interface BookAnalysisImportState {
   revision: number
   initializeProject(projectPath: string): Promise<void>
   createBatch(candidates: BatchImportCandidate[]): Promise<void>
+  deletePublishedBook(bookId: string): Promise<void>
   continueTask(taskId: string): Promise<void>
   regenerateTask(taskId: string): Promise<void>
   cancelTask(taskId: string): Promise<void>
@@ -136,12 +140,17 @@ export function createBookAnalysisImportStore(options: { onRevision?: () => void
       expectedScheduler: BatchImportScheduler,
     ): Promise<void> {
       if (!isCurrent(token, projectPath, expectedScheduler) || candidates.length === 0) return
-      const library = await loadBookLibrary(projectPath)
+      const library = await reconcileBookLibrary(projectPath)
       if (!isCurrent(token, projectPath, expectedScheduler)) return
 
       const reservedTitles = new Set(library.entries.map((entry) => entry.title))
       for (const task of get().tasks) {
-        if (task.status !== "skipped" && task.status !== "cancelled" && task.finalTitle) {
+        if (
+          task.status !== "completed"
+          && task.status !== "skipped"
+          && task.status !== "cancelled"
+          && task.finalTitle
+        ) {
           reservedTitles.add(task.finalTitle)
         }
       }
@@ -330,6 +339,13 @@ export function createBookAnalysisImportStore(options: { onRevision?: () => void
         const operation = schedulerLifecycleChain.then(async () => {
           await previousScheduler?.dispose()
           if (!isCurrent(token, projectPath)) return
+          const library = await reconcileBookLibrary(projectPath)
+          if (!isCurrent(token, projectPath)) return
+          await pruneMissingCompletedBookHistory(
+            projectPath,
+            new Set(library.entries.map((entry) => entry.bookId)),
+          )
+          if (!isCurrent(token, projectPath)) return
           const [tasks, batches] = await Promise.all([
             loadBatchImportTasks(projectPath),
             loadBatchImportBatches(projectPath),
@@ -369,6 +385,45 @@ export function createBookAnalysisImportStore(options: { onRevision?: () => void
         const operation = createBatchChain.then(() => runCreateBatch(candidates, projectPath, token, expectedScheduler))
         createBatchChain = operation.catch(() => undefined)
         return operation
+      },
+
+      deletePublishedBook: async (bookId) => {
+        const projectPath = get().projectPath
+        const currentScheduler = scheduler
+        const token = generation
+        if (!projectPath) throw new Error("请先初始化拆书项目")
+        if (!currentScheduler) throw new Error("拆书库正在加载，请稍后再试。")
+        if (get().tasks.some((task) => (
+          task.bookId === bookId && DELETE_BLOCKING_STATUSES.has(task.status)
+        ))) {
+          throw new Error("作品正在导入或重新生成，请先取消任务后再删除。")
+        }
+
+        const history = await deleteBookAnalysisBook(projectPath, bookId)
+        if (!isCurrent(token, projectPath, currentScheduler)) return
+
+        const removedTaskIds = new Set(history.removedTaskIds)
+        for (const task of get().tasks) {
+          if (task.bookId === bookId) removedTaskIds.add(task.id)
+        }
+        for (const taskId of removedTaskIds) {
+          completedTaskIds.delete(taskId)
+          schedulerTaskIds.delete(taskId)
+          currentScheduler.removeTask(taskId)
+        }
+        set((state) => {
+          const tasks = state.tasks.filter((task) => (
+            task.bookId !== bookId && !removedTaskIds.has(task.id)
+          ))
+          const batches: BatchImportBatch[] = []
+          for (const batch of state.batches) {
+            const taskIds = batch.taskIds.filter((taskId) => !removedTaskIds.has(taskId))
+            if (taskIds.length === 0) continue
+            batches.push(taskIds.length === batch.taskIds.length ? batch : { ...batch, taskIds })
+          }
+          return { tasks, batches, revision: state.revision + 1 }
+        })
+        options.onRevision?.()
       },
 
       continueTask: async (taskId) => {

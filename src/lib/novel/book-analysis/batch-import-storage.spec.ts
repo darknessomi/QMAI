@@ -37,6 +37,8 @@ import {
   loadBatchImportBatches,
   loadBatchImportTasks,
   loadTaskCheckpoint,
+  pruneMissingCompletedBookHistory,
+  removeBatchImportHistoryForBook,
   resetBatchImportTask,
   saveBatchImportBatch,
   saveBatchImportTask,
@@ -73,6 +75,7 @@ function makeTask(overrides: Partial<BatchImportTask> = {}): BatchImportTask {
 }
 
 function seedTask(task: BatchImportTask): void {
+  fsMocks.directories.add(importTasksRoot(task.projectPath))
   const dir = importTaskDir(task.projectPath, task.id)
   fsMocks.directories.add(dir)
   fsMocks.files.set(`${dir}/task.json`, JSON.stringify(task))
@@ -114,7 +117,18 @@ beforeEach(() => {
   fsMocks.fileExists.mockImplementation(async (path) => (
     fsMocks.files.has(path) || fsMocks.directories.has(path)
   ))
-  fsMocks.listDirectory.mockResolvedValue([])
+  fsMocks.listDirectory.mockImplementation(async (path: string) => {
+    const prefix = `${path}/`
+    return [...fsMocks.directories]
+      .filter((directory) => directory.startsWith(prefix))
+      .map((directory) => directory.slice(prefix.length))
+      .filter((name) => name.length > 0 && !name.includes("/"))
+      .map((name) => ({
+        name,
+        path: `${path}/${name}`,
+        is_dir: true,
+      }))
+  })
 })
 
 describe("batch import storage", () => {
@@ -872,5 +886,303 @@ describe("batch import storage", () => {
 
     const saved = JSON.parse(fsMocks.files.get(`${root}/batches.json`)!) as BatchImportBatch[]
     expect(saved.map((batch) => batch.id)).toEqual(["batch-valid", "batch-new"])
+  })
+
+  it("删除指定书籍导入历史时删一留一并只写回一次批次", async () => {
+    const removedTask = makeTask({ id: "task-remove", bookId: "book-remove" })
+    const keptTask = makeTask({
+      id: "task-keep",
+      bookId: "book-keep",
+      batchId: "batch-2",
+      createdAt: 200,
+    })
+    seedTask(removedTask)
+    seedTask(keptTask)
+    const root = importTasksRoot(removedTask.projectPath)
+    const batches: BatchImportBatch[] = [
+      {
+        version: 1,
+        id: "batch-1",
+        projectPath: removedTask.projectPath,
+        taskIds: [removedTask.id, keptTask.id],
+        createdAt: 100,
+        updatedAt: 100,
+      },
+      {
+        version: 1,
+        id: "batch-2",
+        projectPath: removedTask.projectPath,
+        taskIds: [keptTask.id],
+        createdAt: 200,
+        updatedAt: 200,
+      },
+    ]
+    fsMocks.files.set(`${root}/batches.json`, JSON.stringify(batches))
+
+    const result = await removeBatchImportHistoryForBook(
+      removedTask.projectPath,
+      removedTask.bookId,
+    )
+
+    const expectedBatches = [
+      { ...batches[0], taskIds: [keptTask.id] },
+      batches[1],
+    ]
+    expect(result).toEqual({
+      removedTaskIds: [removedTask.id],
+      tasks: [keptTask],
+      batches: expectedBatches,
+    })
+    expect(fsMocks.deleteFile).toHaveBeenCalledOnce()
+    expect(fsMocks.deleteFile).toHaveBeenCalledWith(
+      importTaskDir(removedTask.projectPath, removedTask.id),
+    )
+    expect(fsMocks.files.has(`${importTaskDir(removedTask.projectPath, removedTask.id)}/task.json`))
+      .toBe(false)
+    expect(fsMocks.files.has(`${importTaskDir(keptTask.projectPath, keptTask.id)}/task.json`))
+      .toBe(true)
+    expect(fsMocks.writeFileAtomic).toHaveBeenCalledOnce()
+    expect(fsMocks.writeFileAtomic).toHaveBeenCalledWith(
+      `${root}/batches.json`,
+      JSON.stringify(expectedBatches, null, 2),
+    )
+  })
+
+  it("删除批次中唯一任务时过滤空批次", async () => {
+    const task = makeTask({ id: "task-only", bookId: "book-remove" })
+    seedTask(task)
+    const root = importTasksRoot(task.projectPath)
+    fsMocks.files.set(`${root}/batches.json`, JSON.stringify([{
+      version: 1,
+      id: "batch-only",
+      projectPath: task.projectPath,
+      taskIds: [task.id],
+      createdAt: 100,
+      updatedAt: 100,
+    } satisfies BatchImportBatch]))
+
+    const result = await removeBatchImportHistoryForBook(task.projectPath, task.bookId)
+
+    expect(result).toEqual({
+      removedTaskIds: [task.id],
+      tasks: [],
+      batches: [],
+    })
+    expect(fsMocks.writeFileAtomic).toHaveBeenCalledWith(
+      `${root}/batches.json`,
+      JSON.stringify([], null, 2),
+    )
+  })
+
+  it("删除同一本书的多个导入任务及其批次引用", async () => {
+    const first = makeTask({
+      id: "task-remove-1",
+      bookId: "book-remove",
+      createdAt: 100,
+    })
+    const second = makeTask({
+      id: "task-remove-2",
+      bookId: "book-remove",
+      createdAt: 200,
+    })
+    const kept = makeTask({
+      id: "task-keep",
+      bookId: "book-keep",
+      createdAt: 300,
+    })
+    for (const task of [first, second, kept]) seedTask(task)
+    const root = importTasksRoot(first.projectPath)
+    const batch: BatchImportBatch = {
+      version: 1,
+      id: "batch-1",
+      projectPath: first.projectPath,
+      taskIds: [first.id, second.id, kept.id],
+      createdAt: 100,
+      updatedAt: 100,
+    }
+    fsMocks.files.set(`${root}/batches.json`, JSON.stringify([batch]))
+
+    const result = await removeBatchImportHistoryForBook(first.projectPath, first.bookId)
+
+    expect(result.removedTaskIds).toEqual([first.id, second.id])
+    expect(result.tasks).toEqual([kept])
+    expect(result.batches).toEqual([{ ...batch, taskIds: [kept.id] }])
+    expect(fsMocks.deleteFile.mock.calls.map(([path]) => path)).toEqual([
+      importTaskDir(first.projectPath, first.id),
+      importTaskDir(second.projectPath, second.id),
+    ])
+    expect(fsMocks.writeFileAtomic).toHaveBeenCalledOnce()
+  })
+
+  it("没有匹配任务时不删除、不写入且不创建 batches.json", async () => {
+    const task = makeTask({ id: "task-keep", bookId: "book-keep" })
+    seedTask(task)
+    const batchesPath = `${importTasksRoot(task.projectPath)}/batches.json`
+
+    const result = await removeBatchImportHistoryForBook(task.projectPath, "book-missing")
+
+    expect(result).toEqual({
+      removedTaskIds: [],
+      tasks: [task],
+      batches: [],
+    })
+    expect(fsMocks.deleteFile).not.toHaveBeenCalled()
+    expect(fsMocks.writeFileAtomic).not.toHaveBeenCalled()
+    expect(fsMocks.files.has(batchesPath)).toBe(false)
+  })
+
+  it("删除未分组任务时不创建缺失的 batches.json", async () => {
+    const task = makeTask({ id: "task-ungrouped", bookId: "book-remove" })
+    seedTask(task)
+    const batchesPath = `${importTasksRoot(task.projectPath)}/batches.json`
+
+    const result = await removeBatchImportHistoryForBook(task.projectPath, task.bookId)
+
+    expect(result).toEqual({
+      removedTaskIds: [task.id],
+      tasks: [],
+      batches: [],
+    })
+    expect(fsMocks.deleteFile).toHaveBeenCalledWith(
+      importTaskDir(task.projectPath, task.id),
+    )
+    expect(fsMocks.writeFileAtomic).not.toHaveBeenCalled()
+    expect(fsMocks.files.has(batchesPath)).toBe(false)
+  })
+
+  it("只清理已完成且书籍已不存在的历史并保留其他状态", async () => {
+    const missingCompleted = makeTask({
+      id: "task-completed-missing",
+      bookId: "book-missing",
+      status: "completed",
+      createdAt: 100,
+    })
+    const missingFailed = makeTask({
+      id: "task-failed-missing",
+      bookId: "book-failed",
+      status: "failed",
+      createdAt: 200,
+    })
+    const missingCopying = makeTask({
+      id: "task-copying-missing",
+      bookId: "book-copying",
+      status: "copying",
+      createdAt: 300,
+    })
+    const validCompleted = makeTask({
+      id: "task-completed-valid",
+      bookId: "book-valid",
+      status: "completed",
+      createdAt: 400,
+    })
+    const tasks = [missingCompleted, missingFailed, missingCopying, validCompleted]
+    for (const task of tasks) seedTask(task)
+    const root = importTasksRoot(missingCompleted.projectPath)
+    const batch: BatchImportBatch = {
+      version: 1,
+      id: "batch-1",
+      projectPath: missingCompleted.projectPath,
+      taskIds: tasks.map((task) => task.id),
+      createdAt: 100,
+      updatedAt: 100,
+    }
+    fsMocks.files.set(`${root}/batches.json`, JSON.stringify([batch]))
+
+    const result = await pruneMissingCompletedBookHistory(
+      missingCompleted.projectPath,
+      new Set([validCompleted.bookId]),
+    )
+
+    expect(result.removedTaskIds).toEqual([missingCompleted.id])
+    expect(result.tasks).toEqual([missingFailed, missingCopying, validCompleted])
+    expect(result.batches).toEqual([{
+      ...batch,
+      taskIds: [missingFailed.id, missingCopying.id, validCompleted.id],
+    }])
+    expect(fsMocks.deleteFile).toHaveBeenCalledWith(
+      importTaskDir(missingCompleted.projectPath, missingCompleted.id),
+    )
+    expect(fsMocks.writeFileAtomic).toHaveBeenCalledOnce()
+  })
+
+  it("任务目录已不存在时仍成功并修正已有批次", async () => {
+    const task = makeTask({ id: "task-missing-dir", bookId: "book-remove" })
+    seedTask(task)
+    const root = importTasksRoot(task.projectPath)
+    const dir = importTaskDir(task.projectPath, task.id)
+    fsMocks.files.set(`${root}/batches.json`, JSON.stringify([{
+      version: 1,
+      id: "batch-1",
+      projectPath: task.projectPath,
+      taskIds: [task.id],
+      createdAt: 100,
+      updatedAt: 100,
+    } satisfies BatchImportBatch]))
+    fsMocks.fileExists.mockImplementation(async (path) => (
+      path === dir ? false : fsMocks.files.has(path) || fsMocks.directories.has(path)
+    ))
+
+    const result = await removeBatchImportHistoryForBook(task.projectPath, task.bookId)
+
+    expect(result).toEqual({
+      removedTaskIds: [task.id],
+      tasks: [],
+      batches: [],
+    })
+    expect(fsMocks.writeFileAtomic).toHaveBeenCalledWith(
+      `${root}/batches.json`,
+      JSON.stringify([], null, 2),
+    )
+    expect(fsMocks.deleteFile).not.toHaveBeenCalled()
+  })
+
+  it("删除任务目录失败时向上传播且批次已先写回", async () => {
+    const task = makeTask({ id: "task-remove", bookId: "book-remove" })
+    seedTask(task)
+    const root = importTasksRoot(task.projectPath)
+    fsMocks.files.set(`${root}/batches.json`, JSON.stringify([{
+      version: 1,
+      id: "batch-1",
+      projectPath: task.projectPath,
+      taskIds: [task.id],
+      createdAt: 100,
+      updatedAt: 100,
+    } satisfies BatchImportBatch]))
+    fsMocks.deleteFile.mockRejectedValueOnce(new Error("删除失败"))
+
+    await expect(
+      removeBatchImportHistoryForBook(task.projectPath, task.bookId),
+    ).rejects.toThrow("删除失败")
+
+    expect(fsMocks.writeFileAtomic).toHaveBeenCalledWith(
+      `${root}/batches.json`,
+      JSON.stringify([], null, 2),
+    )
+    expect(fsMocks.writeFileAtomic.mock.invocationCallOrder[0]).toBeLessThan(
+      fsMocks.deleteFile.mock.invocationCallOrder[0],
+    )
+    expect(fsMocks.files.has(`${importTaskDir(task.projectPath, task.id)}/task.json`)).toBe(true)
+  })
+
+  it("批次写回失败时向上传播", async () => {
+    const task = makeTask({ id: "task-remove", bookId: "book-remove" })
+    seedTask(task)
+    const root = importTasksRoot(task.projectPath)
+    fsMocks.files.set(`${root}/batches.json`, JSON.stringify([{
+      version: 1,
+      id: "batch-1",
+      projectPath: task.projectPath,
+      taskIds: [task.id],
+      createdAt: 100,
+      updatedAt: 100,
+    } satisfies BatchImportBatch]))
+    fsMocks.writeFileAtomic.mockRejectedValueOnce(new Error("写回失败"))
+
+    await expect(
+      removeBatchImportHistoryForBook(task.projectPath, task.bookId),
+    ).rejects.toThrow("写回失败")
+
+    expect(fsMocks.deleteFile).not.toHaveBeenCalled()
+    expect(fsMocks.files.has(`${importTaskDir(task.projectPath, task.id)}/task.json`)).toBe(true)
   })
 })

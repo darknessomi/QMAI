@@ -13,6 +13,7 @@ export interface BatchImportScheduler {
   cancelAllQueued(batchId: string): Promise<void>
   syncTerminalTask(task: BatchImportTask): void
   forgetTerminalTask(taskId: string): void
+  removeTask(taskId: string): boolean
   subscribe(listener: (tasks: BatchImportTask[]) => void): () => void
   dispose(): Promise<void>
 }
@@ -324,6 +325,15 @@ export function createBatchImportScheduler(options: {
     notify()
   }
 
+  function removeTask(taskId: string): boolean {
+    if (runningIds.has(taskId) || continuePromises.has(taskId)) return false
+    removeFromQueue(taskId)
+    cancelRequestedIds.delete(taskId)
+    const removed = tasks.delete(taskId)
+    if (removed) notify()
+    return removed
+  }
+
   function subscribe(listener: (tasks: BatchImportTask[]) => void): () => void {
     if (disposed) return () => undefined
     listeners.add(listener)
@@ -365,6 +375,7 @@ export function createBatchImportScheduler(options: {
     cancelAllQueued: (batchId) => disposed ? Promise.resolve() : trackMutation(() => cancelAllQueued(batchId)),
     syncTerminalTask,
     forgetTerminalTask,
+    removeTask,
     subscribe,
     dispose,
   }

@@ -114,6 +114,19 @@ describe("createBatchImportScheduler", () => {
     gates.get("task-3")?.resolve()
   })
 
+  it("removeTask 清除非运行任务且后续快照不会重新出现", () => {
+    const scheduler = createBatchImportScheduler({ projectPath: PROJECT_PATH })
+    const getTasks = latestTasks(scheduler)
+    scheduler.enqueue([
+      makeTask("task-completed", { status: "completed" }),
+      makeTask("task-failed", { status: "failed" }),
+    ])
+
+    expect(scheduler.removeTask("task-completed")).toBe(true)
+    expect(getTasks().map((task) => task.id)).toEqual(["task-failed"])
+    expect(scheduler.removeTask("task-completed")).toBe(false)
+  })
+
   it.each([Number.NaN, Number.POSITIVE_INFINITY])(
     "非有限并发值 %s 回退为默认并发 2",
     async (invalidConcurrency) => {

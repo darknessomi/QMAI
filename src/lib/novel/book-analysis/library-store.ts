@@ -141,6 +141,29 @@ export async function renameBookLibraryEntry(
     return renamedEntry
   })
 }
+
+export async function reconcileBookLibrary(projectPath: string): Promise<BookLibrary> {
+  return withProjectLock(normalizePath(projectPath), async () => {
+    const library = await loadBookLibraryStrictUnlocked(projectPath)
+    const entries: BookLibraryEntry[] = []
+
+    for (const entry of library.entries) {
+      const metadataPath = normalizePath(
+        joinPath(projectPath, "book-analysis", entry.bookId, "metadata.json"),
+      )
+      if (await fileExists(metadataPath)) {
+        entries.push(entry)
+      }
+    }
+
+    if (entries.length === library.entries.length) return library
+
+    const reconciled = { ...library, entries }
+    await saveBookLibraryUnlocked(projectPath, reconciled)
+    return reconciled
+  })
+}
+
 export async function findBookLibraryEntry(
   projectPath: string,
   sourcePath: string,

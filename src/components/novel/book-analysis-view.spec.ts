@@ -127,6 +127,7 @@ const mocks = vi.hoisted(() => {
     handleLibraryExtractStyle,
     handleLibraryReextractCharacters,
     loadBookStoryFrameworkChapters,
+    reloadedLibraryState: libraryState,
     libraryParams: null as any,
     inputDialogProps: null as any,
     taskPanelProps: null as any,
@@ -355,6 +356,7 @@ beforeEach(() => {
   mocks.importState.tasks = []
   mocks.importState.panelCollapsed = false
   mocks.importState.revision = 0
+  mocks.reloadedLibraryState = mocks.libraryState
   mocks.libraryParams = null
   mocks.inputDialogProps = null
   mocks.taskPanelProps = null
@@ -382,8 +384,9 @@ beforeEach(() => {
     { id: "chapter-1", title: "第一章", order: 1, content: "正文" },
   ])
   mocks.reloadLibraryState.mockReset().mockImplementation(async () => {
-    mocks.libraryParams.setLibraryState(mocks.libraryState)
-    mocks.libraryParams.setSelectedBookId((current: string | null) => current && mocks.libraryState.books.some((book) => book.id === current) ? current : "book-1")
+    const next = mocks.reloadedLibraryState
+    mocks.libraryParams.setLibraryState(next)
+    mocks.libraryParams.setSelectedBookId((current: string | null) => current && next.books.some((book) => book.id === current) ? current : next.books[0]?.id ?? null)
   })
 })
 
@@ -473,6 +476,39 @@ describe("BookAnalysisView 批量导入运行时接线", () => {
     await rerenderView()
     expect(mocks.reloadLibraryState).toHaveBeenCalledTimes(1)
     expect(host.querySelector('[data-testid="章节选择面板"]')).toBeNull()
+  })
+
+  it("导入完成的 revision 只刷新一次并让新作品自动进入第二栏", async () => {
+    await renderView()
+    mocks.reloadLibraryState.mockClear()
+    mocks.triggerSidebarRefresh.mockClear()
+    const importedBook = {
+      ...mocks.libraryState.books[0],
+      id: "book-imported",
+      path: "E:/项目甲/book-analysis/book-imported",
+      metadata: {
+        ...mocks.libraryState.books[0].metadata,
+        title: "新导入作品",
+        createdAt: 10,
+        updatedAt: 10,
+      },
+    }
+    mocks.reloadedLibraryState = {
+      ...mocks.libraryState,
+      books: [...mocks.libraryState.books, importedBook],
+    }
+    mocks.importState.tasks = [{ id: "task-imported", bookId: importedBook.id, status: "completed" }] as any
+    mocks.importState.revision = 1
+
+    await rerenderView()
+    expect(mocks.triggerSidebarRefresh).toHaveBeenCalledTimes(1)
+    await rerenderView()
+
+    expect(mocks.reloadLibraryState).toHaveBeenCalledTimes(1)
+    expect(mocks.layoutProps.state.books.map((book: { id: string }) => book.id)).toContain("book-imported")
+    await rerenderView()
+    expect(mocks.triggerSidebarRefresh).toHaveBeenCalledTimes(1)
+    expect(mocks.reloadLibraryState).toHaveBeenCalledTimes(1)
   })
 
   it("createBatch 失败时弹窗保持打开", async () => {

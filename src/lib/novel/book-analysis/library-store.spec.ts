@@ -29,6 +29,7 @@ import {
   findBookLibraryEntry,
   findBookLibraryEntryBySha256,
   loadBookLibrary,
+  reconcileBookLibrary,
   removeBookLibraryEntry,
   renameBookLibraryEntry,
   upsertBookLibraryEntry,
@@ -56,6 +57,10 @@ function entry(overrides: Record<string, unknown> = {}) {
 
 function seedLibrary(entries: ReturnType<typeof entry>[]) {
   memStore.set(libraryFilePath, JSON.stringify({ version: 1, entries }))
+}
+
+function seedMetadata(bookId: string) {
+  memStore.set(`${projectPath}/book-analysis/${bookId}/metadata.json`, "{}")
 }
 
 beforeEach(() => {
@@ -172,6 +177,61 @@ describe("library-store", () => {
     )
     expect(writeFileAtomic).not.toHaveBeenCalled()
   })
+
+  it("reconcileBookLibrary: 移除孤儿条目并保留 metadata 存在的条目", async () => {
+    const validEntry = entry({ bookId: "book-valid", title: "有效作品" })
+    seedLibrary([
+      entry({ bookId: "book-orphan", title: "孤儿作品" }),
+      validEntry,
+    ])
+    seedMetadata("book-valid")
+
+    const library = await reconcileBookLibrary(projectPath)
+
+    expect(library.entries).toEqual([validEntry])
+    expect(writeFileAtomic).toHaveBeenCalledTimes(1)
+    expect(writeFileAtomic).toHaveBeenCalledWith(
+      libraryFilePath,
+      JSON.stringify({ version: 1, entries: [validEntry] }, null, 2),
+    )
+  })
+
+  it("reconcileBookLibrary: 没有孤儿条目时不写回", async () => {
+    const entries = [entry({ bookId: "book-1" }), entry({ bookId: "book-2" })]
+    seedLibrary(entries)
+    seedMetadata("book-1")
+    seedMetadata("book-2")
+
+    const library = await reconcileBookLibrary(projectPath)
+
+    expect(library.entries).toEqual(entries)
+    expect(writeFileAtomic).not.toHaveBeenCalled()
+  })
+
+  it("reconcileBookLibrary: 索引文件不存在时返回空库且不写回", async () => {
+    await expect(reconcileBookLibrary(projectPath)).resolves.toEqual({
+      version: 1,
+      entries: [],
+    })
+    expect(writeFileAtomic).not.toHaveBeenCalled()
+  })
+
+  it("reconcileBookLibrary: 索引 JSON 损坏时拒绝且不写回", async () => {
+    memStore.set(libraryFilePath, "{损坏 JSON")
+
+    await expect(reconcileBookLibrary(projectPath)).rejects.toBeInstanceOf(SyntaxError)
+    expect(writeFileAtomic).not.toHaveBeenCalled()
+  })
+
+  it("reconcileBookLibrary: 索引 schema 损坏时拒绝且不写回", async () => {
+    memStore.set(libraryFilePath, JSON.stringify({ version: 1, entries: null }))
+
+    await expect(reconcileBookLibrary(projectPath)).rejects.toThrow(
+      "作品库索引数据无效",
+    )
+    expect(writeFileAtomic).not.toHaveBeenCalled()
+  })
+
   it("findBookLibraryEntry: 按 sourcePath 命中", async () => {
     await upsertBookLibraryEntry("E:/Proj", {
       bookId: "book-1", sourcePath: "E:/a.txt", contentHash: "abc",
@@ -343,5 +403,13 @@ describe("library-store", () => {
 
     await expect(findBookLibraryEntryBySha256(projectPath, "target-sha")).rejects.toThrow("哈希失败")
     expect(writeFileAtomic).not.toHaveBeenCalled()
+  })
+
+  it("reconcileBookLibrary: 清理写回失败时向上传播", async () => {
+    seedLibrary([entry({ bookId: "book-orphan" })])
+    vi.mocked(writeFileAtomic).mockRejectedValueOnce(new Error("保存失败"))
+
+    await expect(reconcileBookLibrary(projectPath)).rejects.toThrow("保存失败")
+    expect(writeFileAtomic).toHaveBeenCalledTimes(1)
   })
 })

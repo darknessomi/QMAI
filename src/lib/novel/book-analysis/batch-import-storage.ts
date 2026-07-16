@@ -29,6 +29,12 @@ const TASK_STATUSES = new Set<BatchImportTaskStatus>([
   "completed",
 ])
 
+export interface RemovedBookImportHistory {
+  removedTaskIds: string[]
+  tasks: BatchImportTask[]
+  batches: BatchImportBatch[]
+}
+
 function normalizeProjectKey(projectPath: string): string {
   const normalized = normalizePath(projectPath).replace(/\/+$/, "")
   if (!normalized) throw new Error("项目路径不能为空")
@@ -183,8 +189,9 @@ async function ensureTaskDirectories(projectPath: string, taskId: string): Promi
   await createDirectory(`${importTaskDir(projectPath, taskId)}/chapters`)
 }
 
-export async function loadBatchImportTasks(
+async function loadPersistedBatchImportTasks(
   projectPath: string,
+  markRunningTasksInterrupted: boolean,
 ): Promise<BatchImportTask[]> {
   const projectKey = normalizeProjectKey(projectPath)
   const root = importTasksRoot(projectKey)
@@ -208,7 +215,10 @@ export async function loadBatchImportTasks(
       if (validationError) throw new Error(validationError)
       const task = parsed as unknown as BatchImportTask
 
-      if (task.status === "copying" || task.status === "splitting") {
+      if (
+        markRunningTasksInterrupted
+        && (task.status === "copying" || task.status === "splitting")
+      ) {
         const interruptedTask: BatchImportTask = {
           ...task,
           status: "interrupted",
@@ -226,6 +236,12 @@ export async function loadBatchImportTasks(
   }
 
   return tasks.sort((left, right) => left.createdAt - right.createdAt)
+}
+
+export async function loadBatchImportTasks(
+  projectPath: string,
+): Promise<BatchImportTask[]> {
+  return loadPersistedBatchImportTasks(projectPath, true)
 }
 
 export async function saveBatchImportTaskUnlocked(
@@ -275,6 +291,78 @@ export async function loadBatchImportBatches(
   }
   return batches
 }
+
+async function removeMatchingBatchImportHistory(
+  projectPath: string,
+  shouldRemove: (task: BatchImportTask) => boolean,
+): Promise<RemovedBookImportHistory> {
+  const projectKey = normalizeProjectKey(projectPath)
+  return withProjectLock(projectKey, async () => {
+    const tasks = await loadPersistedBatchImportTasks(projectKey, false)
+    const batchesPath = `${importTasksRoot(projectKey)}/batches.json`
+    const batchesFileExists = await fileExists(batchesPath)
+    const batches = await loadBatchImportBatches(projectKey)
+    const removedTaskIds = tasks.filter(shouldRemove).map((task) => task.id)
+
+    if (removedTaskIds.length === 0) {
+      return { removedTaskIds, tasks, batches }
+    }
+
+    const removedTaskIdSet = new Set(removedTaskIds)
+    const remainingTasks = tasks.filter((task) => !removedTaskIdSet.has(task.id))
+    const remainingBatches: BatchImportBatch[] = []
+    let batchesChanged = false
+    for (const batch of batches) {
+      const taskIds = batch.taskIds.filter((taskId) => !removedTaskIdSet.has(taskId))
+      if (taskIds.length === 0) {
+        batchesChanged = true
+        continue
+      }
+      if (taskIds.length !== batch.taskIds.length) {
+        batchesChanged = true
+        remainingBatches.push({ ...batch, taskIds })
+      } else {
+        remainingBatches.push(batch)
+      }
+    }
+
+    if (batchesFileExists && batchesChanged) {
+      await writeFileAtomic(batchesPath, JSON.stringify(remainingBatches, null, 2))
+    }
+
+    for (const taskId of removedTaskIds) {
+      const taskDir = importTaskDir(projectKey, taskId)
+      if (await fileExists(taskDir)) await deleteFile(taskDir)
+    }
+
+    return {
+      removedTaskIds,
+      tasks: remainingTasks,
+      batches: remainingBatches,
+    }
+  })
+}
+
+export async function removeBatchImportHistoryForBook(
+  projectPath: string,
+  bookId: string,
+): Promise<RemovedBookImportHistory> {
+  return removeMatchingBatchImportHistory(
+    projectPath,
+    (task) => task.bookId === bookId,
+  )
+}
+
+export async function pruneMissingCompletedBookHistory(
+  projectPath: string,
+  validBookIds: Set<string>,
+): Promise<RemovedBookImportHistory> {
+  return removeMatchingBatchImportHistory(
+    projectPath,
+    (task) => task.status === "completed" && !validBookIds.has(task.bookId),
+  )
+}
+
 export async function saveBatchImportBatch(batch: BatchImportBatch): Promise<void> {
   const projectKey = normalizeProjectKey(batch.projectPath)
   assertBatchImportBatch(batch, projectKey)

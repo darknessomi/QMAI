@@ -6,9 +6,10 @@
 import { useEffect, useState } from "react"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useBookAnalysisStore } from "@/stores/book-analysis-store"
+import { useBookAnalysisImportStore } from "@/stores/book-analysis-import-store"
 import { Button } from "@/components/ui/button"
 import { BookOpen, Trash2, RefreshCw, Loader2, Square, CheckCircle2 } from "lucide-react"
-import { listDirectory, readFile, deleteFile } from "@/commands/fs"
+import { listDirectory, readFile } from "@/commands/fs"
 import { joinPath, normalizePath } from "@/lib/path-utils"
 import { toast } from "@/lib/toast"
 import { deleteOrphanAurasForBook } from "@/lib/novel/book-analysis/aura-cleanup"
@@ -36,6 +37,7 @@ export function BookAnalysisSidebarPanel() {
   const tasks = useBookAnalysisStore((s) => s.tasks)
   const cancelTask = useBookAnalysisStore((s) => s.cancelTask)
   const requestReopenChapterSelection = useBookAnalysisStore((s) => s.requestReopenChapterSelection)
+  const deletePublishedBook = useBookAnalysisImportStore((s) => s.deletePublishedBook)
   const [books, setBooks] = useState<BookItem[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
@@ -167,7 +169,7 @@ export function BookAnalysisSidebarPanel() {
 
   const handleDeleteBook = async (book: BookItem) => {
     const confirmed = window.confirm(
-      `确认删除作品"${book.title}"吗？\n\n这将删除：\n- 所有角色信息\n- 所有生成的 Skills\n- 分析元数据\n\n此操作无法撤销。`
+      `确认删除作品"${book.title}"吗？\n\n这将删除：\n- 所有角色信息\n- 所有生成的 Skills\n- 分析元数据\n- 导入历史和内容查重记录\n\n此操作无法撤销。`
     )
     if (!confirmed) return
 
@@ -178,9 +180,15 @@ export function BookAnalysisSidebarPanel() {
     }
 
     try {
-      await deleteFile(book.path)
+      await deletePublishedBook(book.id)
       // 同步清理由该作品生成的孤儿灵魂（feature 优化 4）
       const cleaned = await deleteOrphanAurasForBook(projectPath, book.title).catch(() => 0)
+      const activeProjectPath = useWikiStore.getState().project?.path
+      if (
+        !activeProjectPath
+        || normalizePath(activeProjectPath).replace(/\/+$/, "")
+          !== normalizePath(projectPath).replace(/\/+$/, "")
+      ) return
       await loadBooks()
       if (selectedBookId === book.id) {
         setSelectedBookId(null)
@@ -195,7 +203,11 @@ export function BookAnalysisSidebarPanel() {
       }
     } catch (err) {
       console.error("Failed to delete book:", err)
-      toast.error("删除作品失败，请稍后重试")
+      toast.error(
+        err instanceof Error && err.message === "作品正在导入或重新生成，请先取消任务后再删除。"
+          ? err.message
+          : "删除作品失败，请稍后重试",
+      )
     }
   }
 
