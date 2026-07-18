@@ -43,6 +43,7 @@ pub fn run() {
             app.manage(commands::cursor_cli::CursorProxyState::default());
             app.manage(commands::file_sync::FileSyncState::default());
             app.manage(commands::mcp_stdio::McpStdioState::default());
+            app.manage(commands::writing_wake_lock::WritingWakeLockManager::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -106,6 +107,8 @@ pub fn run() {
             commands::backup::export_backup,
             commands::backup::import_backup,
             commands::backup::read_backup_manifest,
+            commands::writing_wake_lock::acquire_writing_wake_lock,
+            commands::writing_wake_lock::release_writing_wake_lock,
             set_proxy_env,
         ])
         .on_window_event(|window, event| {

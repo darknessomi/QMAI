@@ -39,6 +39,7 @@ import {
 } from "@/lib/reference/providers"
 import type { ReferenceToken } from "@/lib/reference/types"
 import { runAiChatSession } from "@/lib/agent/ai-chat-session"
+import { shouldKeepAwakeForWriting, withWritingWakeLock } from "@/lib/writing-wake-lock"
 import { ToolRegistry } from "@/lib/agent/registry"
 import { registerAllBuiltInTools } from "@/lib/agent/tools"
 import {
@@ -1720,7 +1721,12 @@ export function ChatPanel() {
       }
 
       try {
-        const record = await runAiChatSession({
+        const keepAwake = shouldKeepAwakeForWriting({
+          novelMode,
+          intent: effectiveTaskRoute?.intent,
+          planExecuteActive,
+        })
+        const record = await withWritingWakeLock(keepAwake, () => runAiChatSession({
           userMessage: plainText,
           projectPath,
           agentConfig: {
@@ -1779,7 +1785,7 @@ export function ChatPanel() {
               markError(error)
             },
           },
-        })
+        }))
 
         if (controller.signal.aborted) return
         if (!streamSessionGuardRef.current.isActive(capturedConvId, sessionId)) return

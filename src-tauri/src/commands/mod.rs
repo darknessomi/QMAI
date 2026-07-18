@@ -10,3 +10,4 @@ pub mod local_cli_config;
 pub mod mcp_stdio;
 pub mod project;
 pub mod vectorstore;
+pub mod writing_wake_lock;
