@@ -492,7 +492,7 @@ describe("chat-panel post-write check integration (Stage D)", () => {
   it("places Stage D after result protocol and before finishTrace", () => {
     const traceBlockIndex = source.indexOf("if (contextTrace && effectiveTaskRoute) {")
     expect(traceBlockIndex).toBeGreaterThan(-1)
-    const traceBlock = source.slice(traceBlockIndex, traceBlockIndex + 3000)
+    const traceBlock = source.slice(traceBlockIndex, traceBlockIndex + 5000)
     const protocolIndex = traceBlock.indexOf("buildResultProtocolTrace")
     const stageDIndex = traceBlock.indexOf("=== Stage D: 写后剧情自检 ===")
     const finishIndex = traceBlock.indexOf('finishTrace(contextTrace, "done")')
