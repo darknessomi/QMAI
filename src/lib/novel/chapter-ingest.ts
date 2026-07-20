@@ -22,6 +22,7 @@ import { buildStructuredMemoryDocuments, isValidMemorySnapshot } from "./memory-
 import { clearGraphCache } from "@/lib/graph-relevance"
 import { RetrievalStore } from "./retrieval"
 import { computeOutlineIngestBodyBudget } from "@/lib/context-budget"
+import { CHAPTER_BODY_EXCERPT_MAX_CHARS } from "./chapter-excerpts"
 
 export interface ValidationWarning {
   type: "entity_new" | "canon_conflict"
@@ -737,7 +738,7 @@ ${langReminder}`
 章节编号：第${chapterNumber}章
 
 章节正文：
-${chapterBody.slice(0, 8000)}
+${chapterBody.slice(0, CHAPTER_BODY_EXCERPT_MAX_CHARS)}
 
 请输出以下格式的 JSON：
 {

@@ -38,10 +38,8 @@ describe("AI chat context hub integration", () => {
     )
   })
 
-  it("passes project and conversation scope into global user memory", () => {
-    expect(source).toContain("userMemoryProjectKey: projectPath")
-    expect(source).toContain("userMemorySessionKey: capturedConvId")
-    expect(source).toContain("projectKey: projectPath")
-    expect(source).toContain("sessionKey: capturedConvId")
+  it("passes resolved context budget from the model window when novel budget is unlimited", () => {
+    expect(source).toContain("tokenBudget: novelConfig.contextTokenBudget,")
+    expect(source).toContain("maxContextSize: agentConfig.llmConfig.maxContextSize,")
   })
 })

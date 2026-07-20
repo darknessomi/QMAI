@@ -2,6 +2,31 @@ import type { ToolCallStatus } from "@/lib/agent/types"
 
 export type TimelineToolCategory = "read" | "write" | "action" | "virtual"
 
+export function compareToolCallsByStartedAt(
+  a: { id: string; startedAt?: number },
+  b: { id: string; startedAt?: number },
+): number {
+  const aStart = a.startedAt ?? Number.MAX_SAFE_INTEGER
+  const bStart = b.startedAt ?? Number.MAX_SAFE_INTEGER
+  if (aStart !== bStart) return aStart - bStart
+  return a.id.localeCompare(b.id)
+}
+
+/**
+ * 隐藏已有子步骤的父工具（如 run_chapter_workflow），避免父级一直「运行中」置顶、与子步骤双轨重复。
+ * 尚无子步骤时仍展示父级，作为工作流刚启动的占位。
+ */
+export function filterToolCallsForDisplay<T extends { id: string; parentCallId?: string }>(
+  calls: T[],
+): T[] {
+  const parentIdsWithChildren = new Set<string>()
+  for (const call of calls) {
+    if (call.parentCallId) parentIdsWithChildren.add(call.parentCallId)
+  }
+  if (parentIdsWithChildren.size === 0) return calls
+  return calls.filter((call) => !parentIdsWithChildren.has(call.id))
+}
+
 export interface ToolCallEventItem {
   id: string
   name: string

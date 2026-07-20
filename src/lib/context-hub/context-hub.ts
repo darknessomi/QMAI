@@ -78,6 +78,7 @@ function prepareKey(request: ContextHubRequest): string {
     references: request.references ?? [],
     summary: request.existingSummary ?? null,
     tokenBudget: request.tokenBudget ?? null,
+    maxContextSize: request.maxContextSize ?? null,
     forceRefresh: request.forceRefresh ?? false,
   })
 }
@@ -236,6 +237,7 @@ export class ContextHubController implements ContextHub {
       referenceContext: request.references,
       confidence: confidenceFor(request, contextPack),
       tokenBudget: request.tokenBudget,
+      maxContextSize: request.maxContextSize,
     })
     const cacheStats = cacheAdapter.getStats()
     const cacheItems = cacheAdapter.getTraceItems()

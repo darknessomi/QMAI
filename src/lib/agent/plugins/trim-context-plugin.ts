@@ -1,5 +1,7 @@
 import type { PrePlugin, PrePluginInput, PrePluginOutput } from "../pipeline"
 import type { ContextPack, TrimResult } from "@/lib/novel/context-engine"
+import { resolveContextPackTokenBudget } from "@/lib/context-budget"
+import { useWikiStore } from "@/stores/wiki-store"
 
 export interface TrimContextPluginDeps {
   contextPackToPromptFn?: (pack: ContextPack, tokenBudget?: number, options?: { excludeOutline?: boolean }) => string
@@ -26,7 +28,7 @@ export function createTrimContextPlugin(deps: TrimContextPluginDeps = {}): PrePl
       let callId: string | undefined
       if (onVirtualTool) {
         callId = `trim_context_${Date.now()}`
-        const budget = tokenBudget ?? computeTokenBudget(input)
+        const budget = tokenBudget ?? resolveTokenBudget(input)
         onVirtualTool("start", "trim_context", {
           callId,
           params: {
@@ -37,7 +39,7 @@ export function createTrimContextPlugin(deps: TrimContextPluginDeps = {}): PrePl
       }
 
       try {
-        const budget = tokenBudget ?? computeTokenBudget(input)
+        const budget = tokenBudget ?? resolveTokenBudget(input)
         let trimmedPrompt: string
         let trimResult: TrimResult | null = null
 
@@ -89,14 +91,11 @@ export function createTrimContextPlugin(deps: TrimContextPluginDeps = {}): PrePl
   }
 }
 
-function computeTokenBudget(input: PrePluginInput): number | undefined {
-  const maxContextSize = (input.agentConfig as any)?.llmConfig?.maxContextSize
-  if (!maxContextSize) return undefined
-  const estimatedUserTokens = Math.ceil(input.userMessage.length / 4)
-  const estimatedHistoryTokens = input.historyMessages
-    ? input.historyMessages.reduce((acc, msg) => acc + Math.ceil(msg.content.length / 4), 0)
-    : 0
-  const reservedTokens = 2000
-  const budget = maxContextSize - estimatedUserTokens - estimatedHistoryTokens - reservedTokens
-  return budget > 500 ? budget : undefined
+function resolveTokenBudget(input: PrePluginInput): number {
+  const maxContextSize = input.agentConfig?.llmConfig?.maxContextSize
+  const contextTokenBudget = useWikiStore.getState().novelConfig?.contextTokenBudget
+  return resolveContextPackTokenBudget({
+    maxContextSize,
+    contextTokenBudget,
+  })
 }

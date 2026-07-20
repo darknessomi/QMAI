@@ -4,6 +4,7 @@ import type { ChatMessage } from "@/lib/llm-providers"
 import { useWikiStore } from "@/stores/wiki-store"
 import { getOutputLanguage, buildLanguageReminder } from "@/lib/output-language"
 import { contextPackToPrompt, buildContextPack, type ContextPack } from "./context-engine"
+import { CHAPTER_BODY_EXCERPT_MAX_CHARS } from "./chapter-excerpts"
 import { resolveNovelModel } from "./model-resolver"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 
@@ -36,8 +37,12 @@ const NOVEL_LINT_DIMENSIONS = [
   "是否缺少章节钩子",
 ]
 
-export function buildNovelLintPrompt(pack: ContextPack, chapterContent: string): string {
-  return `${contextPackToPrompt(pack)}
+export function buildNovelLintPrompt(
+  pack: ContextPack,
+  chapterContent: string,
+  maxContextSize?: number,
+): string {
+  return `${contextPackToPrompt(pack, undefined, { maxContextSize })}
 
 ${i18n.t("novel.lint.lintInstruction", { defaultValue: "请对以下章节进行连贯性检查，逐一核对以下维度：" })}
 ${NOVEL_LINT_DIMENSIONS.map((key, i) => `${i + 1}. ${key}`).join("\n")}
@@ -45,7 +50,7 @@ ${NOVEL_LINT_DIMENSIONS.map((key, i) => `${i + 1}. ${key}`).join("\n")}
 ${i18n.t("novel.lint.lintOutputFormat", { defaultValue: "请严格按照 JSON 数组格式输出检查结果。每个问题包含以下字段：severity（error/warning/info）、type（问题类型）、message（问题描述）、evidence（正文证据）、relatedMemory（相关记忆引用）、suggestion（修改建议）。如果没有发现问题，输出空数组 []。不要输出任何其他内容。" })}
 
 ${i18n.t("novel.lint.chapterContent", { defaultValue: "章节正文：" })}
-${chapterContent.slice(0, 8000)}`
+${chapterContent.slice(0, CHAPTER_BODY_EXCERPT_MAX_CHARS)}`
 }
 
 export async function runNovelLint(
@@ -77,7 +82,7 @@ export async function runNovelLint(
 请严格按照 JSON 数组格式输出检查结果，不要输出任何其他内容。
 ${langReminder}`
 
-  const userPrompt = buildNovelLintPrompt(contextPack, chapterContent)
+  const userPrompt = buildNovelLintPrompt(contextPack, chapterContent, llmConfig.maxContextSize)
 
   try {
     const messages: ChatMessage[] = [

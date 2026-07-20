@@ -1,3 +1,5 @@
+import { CHAPTER_BODY_EXCERPT_MAX_CHARS } from "./chapter-excerpts"
+
 export const PROMPTS = {
   chapterGeneration: (contextPack: string, chapterGoal: string) =>
     [
@@ -43,7 +45,7 @@ export const PROMPTS = {
       contextPack,
       "",
       "请检查以下章节的连贯性：",
-      chapterContent.slice(0, 8000),
+      chapterContent.slice(0, CHAPTER_BODY_EXCERPT_MAX_CHARS),
       "",
       "检查维度：",
       "1. 人设一致性",

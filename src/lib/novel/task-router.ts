@@ -413,6 +413,13 @@ function parseChineseChapterNumber(text: string): number {
 /**
  * 根据任务路由结果生成对 AI 的系统提示增强
  */
+const CHAPTER_WRITING_INTENTS = new Set<NovelTaskIntent>([
+  "write_chapter",
+  "continue_chapter",
+  "rewrite_chapter",
+  "polish_chapter",
+])
+
 export function buildTaskDirective(route: TaskRouteResult): string {
   const directives: Record<NovelTaskIntent, string> = {
     write_chapter: "用户要求生成新章节。请根据上下文包中的大纲、人物状态和伏笔状态，生成完整的章节正文。注意保持人设一致，结尾留有钩子。",
@@ -437,7 +444,26 @@ export function buildTaskDirective(route: TaskRouteResult): string {
   const directive = directives[route.intent]
   if (!directive) return ""
 
-  return `\n## 任务类型识别\n意图：${intentToLabel(route.intent)}（置信度 ${Math.round(route.confidence * 100)}%）\n指令：${directive}\n`
+  const lines = [
+    "",
+    "## 任务类型识别",
+    `意图：${intentToLabel(route.intent)}（置信度 ${Math.round(route.confidence * 100)}%）`,
+    `指令：${directive}`,
+  ]
+
+  if (
+    CHAPTER_WRITING_INTENTS.has(route.intent) &&
+    typeof route.chapterNumber === "number" &&
+    route.chapterNumber > 0
+  ) {
+    lines.push(`本次写作目标：第 ${route.chapterNumber} 章。`)
+    lines.push(
+      "写正文前先 list_outlines（可传 chapterNumber），再按 type 分流并用 read_outline 读正文，确认对应该章的大纲后再写。",
+    )
+  }
+
+  lines.push("")
+  return lines.join("\n")
 }
 
 function intentToLabel(intent: NovelTaskIntent): string {

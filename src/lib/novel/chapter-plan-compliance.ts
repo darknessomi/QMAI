@@ -1,7 +1,8 @@
 import { streamChat } from "@/lib/llm-client"
 import type { LlmConfig } from "@/stores/wiki-store"
+import { CHAPTER_BODY_EXCERPT_MAX_CHARS } from "./chapter-excerpts"
 
-const FINAL_CONTENT_EXCERPT_MAX_CHARS = 12000
+const FINAL_CONTENT_EXCERPT_MAX_CHARS = CHAPTER_BODY_EXCERPT_MAX_CHARS
 const FINAL_CONTENT_EXCERPT_MARKER = "（正文中段已截断，保留开头与结尾用于检查承接和章末钩子。）"
 
 export type ChapterPlanComplianceStatus =

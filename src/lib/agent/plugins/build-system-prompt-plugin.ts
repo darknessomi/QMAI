@@ -1,10 +1,15 @@
-  import type { PrePlugin, PrePluginInput, PrePluginOutput } from "../pipeline"
+import type { PrePlugin, PrePluginInput, PrePluginOutput } from "../pipeline"
 import { buildTaskDirective } from "@/lib/novel/task-router"
+import {
+  buildOutlineFindProtocol,
+  shouldIncludeOutlineFindProtocol,
+  stripOutlineFindProtocol,
+} from "@/lib/novel/outline-find-protocol"
 import { buildSelectedSkillsPrompt } from "./select-skills-plugin"
 import { getWorkflowModeLabel, resolveAiWorkflowMode, type LegacyAiWorkflowMode } from "../workflow-mode"
 import { WRITING_INTENTS } from "../plan-execute-policy"
 
-  export interface BuildSystemPromptPluginDeps {
+export interface BuildSystemPromptPluginDeps {
   baseSystemPrompt?: string
   buildTaskDirectiveFn?: typeof buildTaskDirective
   onError?: (error: Error) => void
@@ -26,7 +31,9 @@ export function createBuildSystemPromptPlugin(deps: BuildSystemPromptPluginDeps 
         const parts: string[] = []
         const rulesParts: string[] = []
 
-        const base = baseSystemPrompt || (input.agentConfig as any)?.systemPrompt || ""
+        // 去掉 base 里可能已有的找纲协议，统一由本 plugin 注入一次，避免重复。
+        const rawBase = baseSystemPrompt || (input.agentConfig as any)?.systemPrompt || ""
+        const base = rawBase ? stripOutlineFindProtocol(rawBase) : ""
         if (base) {
           parts.push(base)
           rulesParts.push(base)
@@ -42,9 +49,18 @@ export function createBuildSystemPromptPlugin(deps: BuildSystemPromptPluginDeps 
           rulesParts.push(selectedSkillsPrompt)
         }
 
+        const routeForWriting = input.effectiveTaskRoute || input.taskRoute
+        const isWritingTask = Boolean(
+          routeForWriting?.intent && WRITING_INTENTS.has(routeForWriting.intent),
+        )
+
+        if (shouldIncludeOutlineFindProtocol(routeForWriting?.intent)) {
+          const outlineProtocol = buildOutlineFindProtocol(routeForWriting?.chapterNumber)
+          parts.push(outlineProtocol)
+          rulesParts.push(outlineProtocol)
+        }
+
         if (input.planExecuteEnabled && input.aiWorkflowMode) {
-          const routeForPlan = input.effectiveTaskRoute || input.taskRoute
-          const isWritingTask = routeForPlan?.intent && WRITING_INTENTS.has(routeForPlan.intent)
           if (isWritingTask) {
             const planProtocol = buildChapterPlanProtocol(input.aiWorkflowMode)
             parts.push(planProtocol)
@@ -83,7 +99,7 @@ function buildChapterPlanProtocol(mode: LegacyAiWorkflowMode): string {
     "输出规范：",
     "1. 计划必须整体包裹在 `<!-- chapter_plan -->` 和 `<!-- /chapter_plan -->` 标记中。",
     "2. 计划只供用户确认，正文生成必须等待用户确认后再开始。当前阶段禁用正文生成类工具，只能使用读取类工具收集资料。",
-    "3. 计划必须基于会话上下文包；读取资料前先用 list_chapters、list_outlines、list_memories 确认可用文件名，绝不编造资料名称。",
+    "3. 计划必须基于会话上下文包；读取资料前先用 list_chapters、list_outlines、list_memories 确认可用文件名，绝不编造资料名称。list_outlines 后按 type 分流：优先关注 overview（索引）与 concept（硬约束），对 outline 类必须 read_outline 读正文确认对应该章后再写。",
     "4. 计划总长控制在 1200-1800字，避免堆砌分析维度；用结论和执行项表达。",
     "5. 场景必须用 S1/S2/S3 编号，后续正文会按编号执行。",
     "6. 不要使用旧版分析报告式编号标题。",

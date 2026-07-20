@@ -1,3 +1,4 @@
+import { resolveContextPackTokenBudget } from "@/lib/context-budget"
 import { listDirectory, readFile } from "@/commands/fs"
 import i18n from "@/i18n"
 import { searchWiki, tokenizeQuery } from "@/lib/search"
@@ -1104,7 +1105,11 @@ const FIELD_CONFIGS: FieldConfig[] = [
   { titleKey: "novel.contextPack.graphSearchResults", fieldKey: "graphSearchResults" },
 ]
 
-export function contextPackToPrompt(pack: ContextPack, tokenBudget?: number, options?: { excludeOutline?: boolean }): string {
+export function contextPackToPrompt(
+  pack: ContextPack,
+  tokenBudget?: number,
+  options?: { excludeOutline?: boolean; maxContextSize?: number },
+): string {
   const result = trimContextPack(pack, tokenBudget, options)
   return result.prompt
 }
@@ -1140,7 +1145,7 @@ function trimFieldContent(content: string | string[], maxChars: number): string 
 export function trimContextPack(
   pack: ContextPack,
   tokenBudget?: number,
-  options?: { excludeOutline?: boolean }
+  options?: { excludeOutline?: boolean; maxContextSize?: number }
 ): TrimResult {
   const sections: string[] = []
 
@@ -1181,7 +1186,10 @@ export function trimContextPack(
   const originalChars = totalChars
   const trimmedFields: string[] = []
 
-  const targetChars = tokenBudget ? tokenBudget * 4 : Infinity
+  const resolvedTokenBudget = tokenBudget && tokenBudget > 0
+    ? tokenBudget
+    : resolveContextPackTokenBudget({ maxContextSize: options?.maxContextSize })
+  const targetChars = resolvedTokenBudget * 4
 
   if (totalChars <= targetChars) {
     for (const { title, content } of fieldData) {

@@ -27,7 +27,7 @@ export function buildPlanExecutePolicyPrompt(mode: LegacyAiWorkflowMode): string
     "计划必须整体包裹在 `<!-- chapter_plan -->` 和 `<!-- /chapter_plan -->` 标记中。",
     "输出计划后必须暂停，等待用户确认后再进入正文或执行阶段。",
     "计划必须包含：任务目标、已读取依据、缺失资料、执行步骤、确认后动作。",
-    "读取资料前先用 list_chapters、list_outlines、list_memories 确认可用文件；不要凭空编造章节、大纲或记忆条目名称。",
+    "读取资料前先用 list_chapters、list_outlines、list_memories 确认可用文件；不要凭空编造章节、大纲或记忆条目名称。list_outlines 后按 type 分流：优先关注 overview（索引）与 concept（硬约束），对 outline 类必须读正文确认对应该章后再写。",
     "如果资料缺失，必须在“缺失资料”里说明，并基于已读取内容继续制定可执行方案。",
   ].join("\n")
 

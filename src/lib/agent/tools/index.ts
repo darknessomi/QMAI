@@ -28,13 +28,17 @@ import type { UserSkill } from "@/lib/novel/skill-library"
 import type { LlmConfig, SearchApiConfig } from "@/stores/wiki-store"
 import type { TaskRouteResult } from "@/lib/novel/task-router"
 import type { ContextPack } from "@/lib/novel/context-engine"
+import { resolveContextPackTokenBudget } from "@/lib/context-budget"
 
 export interface VirtualToolContext {
   userMessage: string
   projectPath: string
   taskRoute?: TaskRouteResult
   contextPack?: ContextPack
-  targetChars?: number
+  /** ContextPack token budget; resolved from model window when omitted. */
+  tokenBudget?: number
+  /** Session model context window in characters. */
+  maxContextSize?: number
 }
 
 export interface ToolFactoryOptions {
@@ -48,6 +52,8 @@ export interface ToolFactoryOptions {
   mcpTools?: Tool[]
   draftMode?: boolean
   projectPath?: string
+  /** Session model context window in characters (for trim_context defaults). */
+  maxContextSize?: number
   sourceConversationId?: string
   sourceMessageId?: string
   enabledToolNames?: string[]
@@ -80,7 +86,14 @@ export function registerAllBuiltInTools(registry: ToolRegistry, options: ToolFac
   if (shouldRegister("read_outline_history")) registry.register(createReadOutlineHistoryTool(options.getOutlineConversations()))
   if (shouldRegister("search_chapters")) registry.register(createSearchChaptersTool(chaptersDir, options.readTextFile))
   if (shouldRegister("list_chapters")) registry.register(createListChaptersTool(chaptersDir))
-  if (shouldRegister("list_outlines")) registry.register(createListOutlinesTool(outlinesDir))
+  if (shouldRegister("list_outlines")) {
+    registry.register(
+      createListOutlinesTool(outlinesDir, {
+        readTextFile: options.readTextFile,
+        getDefaultChapterNumber: () => options.virtualToolContext?.taskRoute?.chapterNumber,
+      }),
+    )
+  }
   if (shouldRegister("list_memories")) registry.register(createListMemoriesTool(memoryDir))
   if (shouldRegister("list_deductions")) registry.register(createListDeductionsTool(simDir))
   if (shouldRegister("write_chapter")) {
@@ -124,7 +137,13 @@ export function registerAllBuiltInTools(registry: ToolRegistry, options: ToolFac
       registry.register(createLoadContextTool(vtc.projectPath, vtc.userMessage, vtc.taskRoute))
     }
     if (vtc.contextPack && shouldRegister("trim_context")) {
-      registry.register(createTrimContextTool(vtc.contextPack, vtc.targetChars ?? 8000))
+      const tokenBudget = vtc.tokenBudget
+        ?? resolveContextPackTokenBudget({
+          maxContextSize: vtc.maxContextSize
+            ?? options.maxContextSize
+            ?? options.llmConfig?.maxContextSize,
+        })
+      registry.register(createTrimContextTool(vtc.contextPack, tokenBudget))
     }
   }
 }

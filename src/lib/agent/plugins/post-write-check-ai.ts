@@ -1,5 +1,6 @@
 import type { PostWriteCheck, PostWriteCheckItem } from "../context-trace"
 import type { ContextPack } from "@/lib/novel/context-engine"
+import { CHAPTER_BODY_EXCERPT_MAX_CHARS } from "@/lib/novel/chapter-excerpts"
 import type { LlmConfig } from "@/stores/wiki-store"
 import { streamChat } from "@/lib/llm-client"
 import { resolveNovelModel, type NovelTaskType } from "@/lib/novel/model-resolver"
@@ -28,8 +29,8 @@ const AI_TIMEOUT_MS = 30_000
 const VALID_SEVERITIES = ["info", "warning", "error"] as const
 
 function buildPostWriteCheckPrompt(chapterContent: string, contextPack?: ContextPack): string {
-  const truncated = chapterContent.length > 8000
-    ? chapterContent.slice(0, 8000) + "\n\n[正文已截断]"
+  const truncated = chapterContent.length > CHAPTER_BODY_EXCERPT_MAX_CHARS
+    ? chapterContent.slice(0, CHAPTER_BODY_EXCERPT_MAX_CHARS) + "\n\n[正文已截断]"
     : chapterContent
   const chapterGoal = contextPack?.chapterGoal || "未提供"
   const previousEnding = contextPack?.previousChapterEnding || "未提供"

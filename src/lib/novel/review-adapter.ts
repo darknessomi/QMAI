@@ -4,6 +4,7 @@ import type { ChatMessage } from "@/lib/llm-providers"
 import { useWikiStore } from "@/stores/wiki-store"
 import { getOutputLanguage, buildLanguageReminder } from "@/lib/output-language"
 import { contextPackToPrompt, buildContextPack, type ContextPack } from "./context-engine"
+import { CHAPTER_BODY_EXCERPT_MAX_CHARS } from "./chapter-excerpts"
 import { resolveNovelModel } from "./model-resolver"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { rethrowIfUserAbort } from "@/lib/user-abort"
@@ -88,12 +89,12 @@ const REVIEW_STAGES = [
   "阶段7：二次复核",
 ]
 
-const REVIEW_CHUNK_SIZE = 8000
+const REVIEW_CHUNK_SIZE = CHAPTER_BODY_EXCERPT_MAX_CHARS
 const REVIEW_MAX_CHUNKS = 3
 
 /**
- * 把超长章节分段用于审查。章节 ≤ 8000 字时返回单段；
- * 超过时按 8000 字一段切分，最多 3 段（覆盖 24000 字），超出部分追加到最后一段。
+ * 把超长章节分段用于审查。章节 ≤ 12000 字时返回单段；
+ * 超过时按 12000 字一段切分，最多 3 段（覆盖 36000 字），超出部分追加到最后一段。
  */
 function splitChapterForReview(content: string): string[] {
   if (content.length <= REVIEW_CHUNK_SIZE) return [content]
@@ -113,6 +114,7 @@ export function buildReviewPrompt(
   chapterContent: string,
   characterOnly = false,
   planBlueprint?: string,
+  maxContextSize?: number,
 ): string {
   const baseDimensions = characterOnly ? CHARACTER_REVIEW_DIMENSIONS : REVIEW_DIMENSIONS
   // 当传入用户确认的计划时，追加计划偏离维度（characterOnly 模式下不追加，保持轻量）
@@ -135,7 +137,7 @@ export function buildReviewPrompt(
         planBlueprint.trim(),
       ].join("\n")
     : ""
-  return `${contextPackToPrompt(pack)}
+  return `${contextPackToPrompt(pack, undefined, { maxContextSize })}
 
 ${modeTitle}：
 ${modeStages.map((stage) => `- ${stage}：必须使用高级 thinking，先分析证据，再给结论。`).join("\n")}
@@ -180,7 +182,7 @@ ${blueprintSection}
 4. 输出要求：在审查 JSON 中，角色相关问题 type 使用 "character_consistency"，relatedMemory 必须引用对应的光环/状态/认知/大纲原文。
 
 ${i18n.t("novel.reviewPrompt.chapterContent")}
-${chapterContent.slice(0, 8000)}
+${chapterContent.slice(0, CHAPTER_BODY_EXCERPT_MAX_CHARS)}
 
 ${i18n.t("novel.reviewPrompt.outputFormat")}
 [
@@ -277,7 +279,13 @@ ${langReminder}`
       const chunkContent = chunks.length > 1
         ? `【第${i + 1}段/共${chunks.length}段】\n${chunk}`
         : chunk
-      const userPrompt = buildReviewPrompt(contextPack, chunkContent, options.characterOnly, options.planBlueprint)
+      const userPrompt = buildReviewPrompt(
+        contextPack,
+        chunkContent,
+        options.characterOnly,
+        options.planBlueprint,
+        llmConfig.maxContextSize,
+      )
       const stageTitle = chunks.length > 1
         ? (options.characterOnly ? `角色一致性审查（第${i + 1}/${chunks.length}段）` : `深度审查（第${i + 1}/${chunks.length}段）`)
         : (options.characterOnly ? "角色一致性审查" : "深度审查")

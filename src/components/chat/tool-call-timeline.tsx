@@ -101,7 +101,7 @@ export function getToolCallDescription(name: string, params: Record<string, unkn
     case "load_context":
       return `加载小说上下文${params.chapterNumber ? `（第${params.chapterNumber}章）` : ""}`
     case "trim_context":
-      return `裁剪上下文至 ${params.targetChars || "默认"} 字符`
+      return `裁剪上下文至 ${params.tokenBudget || params.targetChars || "默认"} Token`
     default:
       return name
   }

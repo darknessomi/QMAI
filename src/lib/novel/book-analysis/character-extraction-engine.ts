@@ -20,6 +20,7 @@ import { joinPath } from "@/lib/path-utils"
 import { streamChat, type ChatMessage } from "@/lib/llm-client"
 import { analyzeSixDimensions, DEPTH_DESCRIPTIONS } from "./six-dimension-engine"
 import { stableCharacterId } from "./character-recognition-engine"
+import { CHAPTER_BODY_EXCERPT_MAX_CHARS } from "@/lib/novel/chapter-excerpts"
 
 export interface CharacterExtractionInput {
   bookPath: string
@@ -72,7 +73,7 @@ async function identifyCharactersInChapter(
 章节：${chapterTitle}
 
 内容：
-${chapterContent.substring(0, 8000)} ${chapterContent.length > 8000 ? "...(内容过长已截断)" : ""}
+${chapterContent.substring(0, CHAPTER_BODY_EXCERPT_MAX_CHARS)} ${chapterContent.length > CHAPTER_BODY_EXCERPT_MAX_CHARS ? "...(内容过长已截断)" : ""}
 
 请以JSON格式返回角色列表，格式如下：
 {

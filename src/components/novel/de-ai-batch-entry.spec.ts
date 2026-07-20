@@ -15,6 +15,7 @@ describe("de-ai batch entry and settings", () => {
     expect(previewPanel).toContain("registerEditorExternalUpdateHandler")
     expect(previewPanel).toContain("createDeAiBatchChapterApplier")
     expect(previewPanel).toContain("await applyDeAiBatchChapter(task.chapterPath, task.candidateContent)")
+    expect(previewPanel).toContain("useDeAiTaskStore.getState().closeReview(project.path)")
     expect(previewPanel).toContain("saveDeAiDraftWithoutOverwrite")
     expect(previewPanel).toContain("writeFileIfAbsent")
     expect(previewPanel).toContain("deAiDraftSaving")
@@ -44,5 +45,4 @@ describe("de-ai batch entry and settings", () => {
     expect(novelSection).toContain("deAiBatchConcurrency")
   })
 })
-
 

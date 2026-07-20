@@ -128,7 +128,7 @@ describe("applyAgentToolEvent", () => {
     expect(event.content).toContain("铜铃线索")
   })
 
-  it("converts workflow child events into chapter workflow activities", () => {
+  it("skips writing chapter_* child tool events into agent stages", () => {
     const event = activityEventFromAgentToolEvent({
       type: "result",
       callId: "workflow-1:chapter_task_brief",
@@ -139,10 +139,49 @@ describe("applyAgentToolEvent", () => {
       timestamp: 200,
     })
 
+    expect(event).toBeNull()
+
+    const stages = applyAgentToolActivityEvent(
+      [
+        {
+          id: "read_context",
+          title: "读取上下文",
+          status: "done",
+          summary: "已完成",
+          events: [],
+          startedAt: 100,
+          finishedAt: 150,
+        },
+      ],
+      {
+        type: "result",
+        callId: "workflow-1:chapter_task_brief",
+        parentCallId: "workflow-1",
+        name: "chapter_task_brief",
+        params: { title: "生成写作任务书" },
+        result: "写作任务书完成。",
+        timestamp: 200,
+      },
+    )
+
+    expect(stages).toHaveLength(1)
+    expect(stages[0].id).toBe("read_context")
+  })
+
+  it("still maps orphan chapter_* events without parentCallId into chapter_workflow", () => {
+    const event = activityEventFromAgentToolEvent({
+      type: "result",
+      callId: "orphan-chapter-context",
+      name: "chapter_context",
+      params: { title: "读取上下文" },
+      result: "上下文完成。",
+      timestamp: 200,
+    })
+
     expect(event).toMatchObject({
       stageId: "chapter_workflow",
       kind: "stage_output",
-      title: "生成写作任务书",
+      title: "读取上下文",
     })
   })
 

@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useEffect } from "react"
 import type { ToolCallRecord } from "@/lib/agent/tool-events"
 import type { ToolCallEventItem, TimelineToolCategory } from "@/components/common/timeline-types"
-import { createStreamingEventBuilder } from "@/components/common/timeline-types"
+import { compareToolCallsByStartedAt, createStreamingEventBuilder, filterToolCallsForDisplay } from "@/components/common/timeline-types"
 import { EventStream } from "@/components/common/event-stream"
 import { extractThinkingContent } from "@/lib/novel/outline-stage-trace"
 import { getWorkflowToolDescription } from "@/lib/agent/workflow-trace"
@@ -62,11 +62,7 @@ export const OutlineWorkflowStages = React.memo(function OutlineWorkflowStages(
   const thinkingStreaming = thinkingExtract.streaming || isStreaming
 
   const sortedCalls = useMemo(() => {
-    return [...toolCalls].sort((a, b) => {
-      const aStart = (a as { startedAt?: number }).startedAt ?? 0
-      const bStart = (b as { startedAt?: number }).startedAt ?? 0
-      return aStart - bStart
-    })
+    return filterToolCallsForDisplay([...toolCalls]).sort(compareToolCallsByStartedAt)
   }, [toolCalls])
 
   const adaptedCalls = useMemo(

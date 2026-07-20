@@ -68,7 +68,14 @@ export function settleRunningAgentToolCalls(
   })
 }
 
+/** chapter_* 子步骤已在工具时间线展示，且细粒度阶段由 onActivityEvent 写入，避免双轨重复。 */
+export function shouldSkipToolActivityForStages(event: AgentToolEvent): boolean {
+  return Boolean(event.parentCallId) && event.name.startsWith("chapter_")
+}
+
 export function activityEventFromAgentToolEvent(event: AgentToolEvent) {
+  if (shouldSkipToolActivityForStages(event)) return null
+
   const activity = activityEventFromToolEvent(event)
   const titleFromParams = typeof event.params.title === "string" ? event.params.title : ""
 
@@ -88,5 +95,7 @@ export function applyAgentToolActivityEvent(
   stages: AgentStageTrace[] | undefined,
   event: AgentToolEvent,
 ): AgentStageTrace[] {
-  return applyAgentActivityEvent(stages, activityEventFromAgentToolEvent(event))
+  const activity = activityEventFromAgentToolEvent(event)
+  if (!activity) return stages ?? []
+  return applyAgentActivityEvent(stages, activity)
 }

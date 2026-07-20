@@ -41,7 +41,7 @@ describe("de-ai batch chapter apply", () => {
     const written = writeFileAtomic.mock.calls[0][1]
     expect(written).toContain("custom: keep-me")
     expect(written).toContain("# 第一章 原标题")
-    expect(written).toContain("批量去 AI 味候选正文")
+    expect(written).toContain("　　批量去 AI 味候选正文")
     expect(written).not.toContain("status: malicious")
     expect(written).not.toContain("# 不应替换原标题")
   })
@@ -75,7 +75,7 @@ describe("de-ai batch chapter apply", () => {
     expect(editorContent).toBe(diskContent)
     expect(diskContent).toContain("custom: keep-me")
     expect(diskContent).toContain("# 第一章 原标题")
-    expect(diskContent).toContain("批量去 AI 味候选正文")
+    expect(diskContent).toContain("　　批量去 AI 味候选正文")
     expect(diskContent).not.toContain("编辑器中的旧正文")
     expect(dataVersion).toBe(1)
   })
@@ -139,7 +139,7 @@ describe("de-ai batch chapter apply", () => {
     await expect(applying).resolves.toBe(true)
     oldAutoSaveA()
 
-    expect(diskA).toContain("批量去 AI 味候选正文")
+    expect(diskA).toContain("　　批量去 AI 味候选正文")
     expect(diskB).toBe("B 编辑器正文")
     expect(commitEditor).not.toHaveBeenCalled()
     expect(bumpDataVersion).toHaveBeenCalledTimes(1)
@@ -184,7 +184,7 @@ describe("de-ai batch chapter apply", () => {
     releaseExternalWrite()
     await Promise.all([applying, flushing])
 
-    expect(diskA).toContain("批量去 AI 味候选正文")
+    expect(diskA).toContain("　　批量去 AI 味候选正文")
     expect(flushWrite).not.toHaveBeenCalled()
     expect(editorB).toBe("B 编辑器正文")
     expect(commitEditor).not.toHaveBeenCalled()
@@ -201,4 +201,3 @@ describe("de-ai batch chapter apply", () => {
     expect(flushWrite).toHaveBeenCalledTimes(1)
   })
 })
-

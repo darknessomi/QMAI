@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { streamChat, type ChatMessage } from "@/lib/llm-client"
 import { buildContextPack, contextPackToPrompt } from "@/lib/novel/context-engine"
-import { computeNovelContextTokenBudget } from "@/lib/context-budget"
+import { resolveContextPackTokenBudget } from "@/lib/context-budget"
 import { resolveNovelModel } from "@/lib/novel/model-resolver"
 import { useWikiStore } from "@/stores/wiki-store"
 import {
@@ -357,8 +357,12 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
       }
       const contextPack = await buildContextPack(project.path, auraPreviewTask)
       const previewPack = { ...contextPack, characterAuras: characterAuraPreview }
-      const contextPrompt = contextPackToPrompt(previewPack, computeNovelContextTokenBudget(llmConfig.maxContextSize, novelConfig.contextTokenBudget))
+      // 预算须绑定实际发起调用的模型窗口，而非 store 里的基础 llmConfig。
       const effectiveConfig = resolveNovelModel(llmConfig, novelConfig, "writing")
+      const contextPrompt = contextPackToPrompt(previewPack, resolveContextPackTokenBudget({
+        maxContextSize: effectiveConfig.maxContextSize,
+        contextTokenBudget: novelConfig.contextTokenBudget,
+      }))
       const messages: ChatMessage[] = [
         {
           role: "system",

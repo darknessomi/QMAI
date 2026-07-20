@@ -13,7 +13,7 @@ import {
   isReasoningOnlyResponseError,
   withReasoningDisabled,
 } from "@/lib/reasoning-retry";
-import { computeNovelContextTokenBudget } from "@/lib/context-budget";
+import { computeWritingContextPackTokenBudget } from "@/lib/context-budget";
 import { USER_ABORT_MESSAGE, rethrowIfUserAbort, throwIfAborted } from "@/lib/user-abort";
 import {
   buildContextPack,
@@ -146,9 +146,6 @@ const defaultDeps: DeepChapterGenerationDeps = {
 const REPEAT_CHECK_MIN_CHARS = 600;
 const REPEAT_WINDOW_CHARS = 120;
 const REPEAT_HIT_LIMIT = 3;
-/** Legacy deep-chapter context budget (tokens). Kept as the upper bound;
- *  computeNovelContextTokenBudget clamps it down for small context windows. */
-const DEEP_CHAPTER_CONTEXT_TOKEN_BUDGET = 32000;
 /** chars/token approximation used to convert the token budget to characters
  *  for the outline cap (mirrors context-budget.ts / contextPackToPrompt). */
 const DEEP_CHAPTER_CHARS_PER_TOKEN = 4;
@@ -656,12 +653,25 @@ export async function runDeepChapterGeneration(
   );
   throwIfAborted(signal);
 
-  // 大纲与其余上下文共用同一窗口预算（派生自 maxContextSize）。大纲优先，
-  // 但设有上限占比，避免其独占整个窗口；剩余额度再分给记忆/设定/检索上下文。
-  const totalContextTokenBudget = computeNovelContextTokenBudget(
-    input.llmConfig.maxContextSize,
-    DEEP_CHAPTER_CONTEXT_TOKEN_BUDGET,
-  );
+  // 任务书(workflowConfig)、初稿/返修(writingConfig)、去AI味(deAiConfig)复用同一份
+  // outlinePrompt + contextPrompt。这三个环节可能用不同模型、各有独立上下文窗口，
+  // 因此预算取三者窗口的最小值：确保任一环节都不必依赖 llm-client 末级无差别截断
+  // （末级截断按字符砍，会绕过 ContextPack 的字段优先级），并让各环节看到一致的上下文。
+  const sharedContextWindows = [
+    writingConfig.maxContextSize,
+    workflowConfig.maxContextSize,
+    deAiConfig.maxContextSize,
+  ].filter((size): size is number => typeof size === "number" && size > 0);
+  const sharedContextWindow = sharedContextWindows.length > 0
+    ? Math.min(...sharedContextWindows)
+    : input.llmConfig.maxContextSize;
+
+  // 大纲与其余上下文共用同一窗口预算：按单章目标字数×2预留输出，再分配资料包。
+  const totalContextTokenBudget = computeWritingContextPackTokenBudget({
+    maxContextSize: sharedContextWindow,
+    contextTokenBudget: novelConfig.contextTokenBudget,
+    chapterTargetChars: novelConfig.chapterTargetChars,
+  });
   const totalContextCharBudget =
     totalContextTokenBudget * DEEP_CHAPTER_CHARS_PER_TOKEN;
   const outlineCharCap = Math.floor(

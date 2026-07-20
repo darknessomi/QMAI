@@ -344,7 +344,7 @@ describe("review-adapter staged review", () => {
       callbacks.onDone()
     })
 
-    await expect(reviewChapter("E:/Novel", "正".repeat(9000), 8, {
+    await expect(reviewChapter("E:/Novel", "正".repeat(13000), 8, {
       contextPack,
       throwOnFailure: true,
     })).rejects.toThrow()

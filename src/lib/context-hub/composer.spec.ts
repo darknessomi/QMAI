@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { computeNovelContextTokenBudget } from "@/lib/context-budget"
 import type { ContextPack } from "@/lib/novel/context-engine"
 import { composeContext } from "./composer"
 import { estimateContextTokens } from "./token-estimator"
@@ -140,5 +141,25 @@ describe("composeContext", () => {
     expect(result.stats.budgetTokens).toBe(800)
     expect(result.stats.composedTokens).toBeLessThanOrEqual(800)
     expect(result.stats.utilizationPercent).toBeLessThanOrEqual(100)
+  })
+
+  it("无显式预算时按模型上下文窗口安全比例计算，而不是写死上限", () => {
+    const large = composeContext({
+      contextPack: pack(),
+      dependencies: {},
+      maxContextSize: 204_800,
+      tokenBudget: 0,
+    })
+    const small = composeContext({
+      contextPack: pack(),
+      dependencies: {},
+      maxContextSize: 32_000,
+      tokenBudget: 0,
+    })
+
+    expect(large.stats.budgetTokens).toBe(computeNovelContextTokenBudget(204_800, 0))
+    expect(small.stats.budgetTokens).toBe(computeNovelContextTokenBudget(32_000, 0))
+    expect(large.stats.budgetTokens).toBeGreaterThan(small.stats.budgetTokens)
+    expect(large.stats.budgetTokens).not.toBe(16_000)
   })
 })

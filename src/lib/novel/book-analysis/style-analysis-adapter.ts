@@ -15,6 +15,7 @@ import {
 } from "./style-prompts"
 import { styleProfileToMarkdown } from "./style-extraction-engine"
 import type { BookStyleProfile } from "./types"
+import { CHAPTER_BODY_EXCERPT_MAX_CHARS } from "@/lib/novel/chapter-excerpts"
 
 export interface StyleAnalysisChunkResult {
   raw: string
@@ -128,7 +129,7 @@ export function createStyleAnalysisAdapter(
       const blocks: string[] = []
       for (const chapterId of chunk.chapterIds) {
         const raw = await dependencies.readFile(joinPath(bookPath, "chapters", `${chapterId}.md`))
-        const body = stripFrontmatter(raw).slice(0, 8000)
+        const body = stripFrontmatter(raw).slice(0, CHAPTER_BODY_EXCERPT_MAX_CHARS)
         if (body) blocks.push(`【章节ID：${chapterId}】\n${body}`)
       }
       if (blocks.length !== chunk.chapterIds.length) throw new Error("所选文风章节正文为空，请检查后重试")

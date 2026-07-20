@@ -5,6 +5,8 @@ import {
   createAgentActivityEvent,
   createStageStartedEvent,
   getDefaultOpenAgentStageId,
+  prepareAgentStagesForDisplay,
+  resolveAgentStageTitle,
   settleRunningAgentStages,
   summarizeAgentStage,
 } from "./activity-trace"
@@ -185,5 +187,92 @@ describe("activity trace", () => {
       status: "approval_required",
       finishedAt: 320,
     })
+  })
+
+  it("sorts stages by canonical display order and hides redundant chapter_workflow", () => {
+    const stages: AgentStageTrace[] = [
+      {
+        id: "final_output",
+        title: "最终输出",
+        status: "done",
+        summary: "完成",
+        events: [],
+        startedAt: 400,
+      },
+      {
+        id: "chapter_workflow",
+        title: "多任务写作循环",
+        status: "running",
+        summary: "聚合",
+        events: [],
+        startedAt: 50,
+      },
+      {
+        id: "generate_draft",
+        title: "生成章节草稿",
+        status: "done",
+        summary: "草稿",
+        events: [],
+        startedAt: 200,
+      },
+      {
+        id: "read_context",
+        title: "读取上下文",
+        status: "done",
+        summary: "上下文",
+        events: [],
+        startedAt: 100,
+      },
+      {
+        id: "write_confirmation",
+        title: "写入确认",
+        status: "approval_required",
+        summary: "待确认",
+        events: [],
+        startedAt: 500,
+      },
+    ]
+
+    const prepared = prepareAgentStagesForDisplay(stages)
+    expect(prepared.map((stage) => stage.id)).toEqual([
+      "read_context",
+      "generate_draft",
+      "final_output",
+      "write_confirmation",
+    ])
+  })
+
+  it("keeps chapter_workflow when no detailed chapter stages exist", () => {
+    const stages: AgentStageTrace[] = [
+      {
+        id: "chapter_workflow",
+        title: "多任务写作循环",
+        status: "running",
+        summary: "运行中",
+        events: [],
+        startedAt: 100,
+      },
+      {
+        id: "write_confirmation",
+        title: "写入确认",
+        status: "approval_required",
+        summary: "待确认",
+        events: [],
+        startedAt: 200,
+      },
+    ]
+
+    expect(prepareAgentStagesForDisplay(stages).map((stage) => stage.id)).toEqual([
+      "write_confirmation",
+      "chapter_workflow",
+    ])
+  })
+
+  it("resolves titles for post-draft strict stages", () => {
+    expect(resolveAgentStageTitle("execution_report")).toBe("执行报告")
+    expect(resolveAgentStageTitle("execution_recheck")).toBe("执行复检")
+    expect(resolveAgentStageTitle("plan_compliance")).toBe("计划履约")
+    expect(resolveAgentStageTitle("plan_deviation_repair")).toBe("计划偏离返修")
+    expect(resolveAgentStageTitle("plan_deviation_recheck")).toBe("计划偏离复检")
   })
 })

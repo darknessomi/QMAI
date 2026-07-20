@@ -99,6 +99,51 @@ describe("AgentToolCallMessage", () => {
     expect(host.textContent).not.toContain("apply_skill")
   })
 
+  it("hides parent run_chapter_workflow once child chapter steps exist", async () => {
+    await act(async () => {
+      root.render(
+        <AgentToolCallMessage
+          toolCalls={[
+            {
+              id: "workflow-1",
+              name: "run_chapter_workflow",
+              params: {},
+              result: "",
+              status: "running",
+              startedAt: 100,
+              finishedAt: 0,
+            },
+            {
+              id: "workflow-1:chapter_context",
+              parentCallId: "workflow-1",
+              name: "chapter_context",
+              params: { title: "读取上下文" },
+              result: "上下文完成",
+              status: "done",
+              startedAt: 110,
+              finishedAt: 150,
+            },
+            {
+              id: "workflow-1:chapter_execution_repair",
+              parentCallId: "workflow-1",
+              name: "chapter_execution_repair",
+              params: { title: "返修执行失败项" },
+              result: "",
+              status: "running",
+              startedAt: 200,
+              finishedAt: 0,
+            },
+          ]}
+        />,
+      )
+    })
+
+    expect(host.textContent).not.toContain("运行章节工作流")
+    expect(host.textContent).toContain("读取章节上下文")
+    expect(host.textContent).toContain("返修执行清单失败项")
+    expect(host.textContent).toContain("运行中")
+  })
+
   it("shows error style for failed tool calls", async () => {
     await act(async () => {
       root.render(<AgentToolCallMessage toolCalls={[sampleCalls[4]]} />)

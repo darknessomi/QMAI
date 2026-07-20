@@ -11,7 +11,11 @@ import {
   Wrench,
   XCircle,
 } from "lucide-react"
-import { getDefaultOpenAgentStageId, summarizeAgentStage } from "@/lib/agent/activity-trace"
+import {
+  getDefaultOpenAgentStageId,
+  prepareAgentStagesForDisplay,
+  summarizeAgentStage,
+} from "@/lib/agent/activity-trace"
 import type { AgentActivityEvent, AgentActivityKind, AgentStageStatus, AgentStageTrace } from "@/lib/agent/types"
 import { cn } from "@/lib/utils"
 
@@ -20,7 +24,7 @@ interface AgentStageStreamProps {
 }
 
 export function AgentStageStream({ stages }: AgentStageStreamProps) {
-  const visibleStages = stages ?? []
+  const visibleStages = useMemo(() => prepareAgentStagesForDisplay(stages), [stages])
   const defaultOpenStageId = useMemo(() => getDefaultOpenAgentStageId(visibleStages), [visibleStages])
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({})
   const [allOpen, setAllOpen] = useState(false)

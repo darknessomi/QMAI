@@ -2,7 +2,7 @@ import { useMemo, useRef, useEffect } from "react"
 import { getWorkflowToolDescription } from "@/lib/agent/workflow-trace"
 import type { AgentRunRecord } from "@/lib/agent/types"
 import type { ContextTrace } from "@/lib/agent/context-trace"
-import { createStreamingEventBuilder } from "@/components/common/timeline-types"
+import { createStreamingEventBuilder, compareToolCallsByStartedAt, filterToolCallsForDisplay } from "@/components/common/timeline-types"
 import type { ToolCallEventItem, TimelineToolCategory } from "@/components/common/timeline-types"
 import { EventStream } from "@/components/common/event-stream"
 
@@ -62,7 +62,7 @@ export function AgentWorkflowPanel({
   const wasStreamingRef = useRef(false)
 
   const sortedCalls = useMemo(
-    () => [...safeToolCalls].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0)),
+    () => filterToolCallsForDisplay([...safeToolCalls]).sort(compareToolCallsByStartedAt),
     [safeToolCalls],
   )
 

@@ -117,7 +117,10 @@ export interface ContextHubRequest {
   references?: string[]
   messages?: AgentMessage[]
   existingSummary?: SessionContextSummary
+  /** Explicit token budget; 0 / undefined = window-derived safe cap. */
   tokenBudget?: number
+  /** Model context window in characters (wiki-store `maxContextSize`). */
+  maxContextSize?: number
   forceRefresh?: boolean
 }
 

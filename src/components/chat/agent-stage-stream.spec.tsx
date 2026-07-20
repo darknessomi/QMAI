@@ -68,4 +68,52 @@ describe("AgentStageStream", () => {
     expect(html).toContain("min-w-0")
     expect(html).toContain("max-w-full")
   })
+
+  it("renders stages in canonical order and hides redundant chapter_workflow", () => {
+    const disordered: AgentStageTrace[] = [
+      {
+        id: "final_output",
+        title: "最终输出",
+        status: "done",
+        summary: "正文已生成",
+        events: [],
+        startedAt: 400,
+      },
+      {
+        id: "chapter_workflow",
+        title: "多任务写作循环",
+        status: "running",
+        summary: "不应展示",
+        events: [],
+        startedAt: 50,
+      },
+      {
+        id: "read_context",
+        title: "读取上下文",
+        status: "done",
+        summary: "已读",
+        events: [],
+        startedAt: 100,
+      },
+      {
+        id: "generate_draft",
+        title: "生成章节草稿",
+        status: "done",
+        summary: "草稿完成",
+        events: [],
+        startedAt: 200,
+      },
+    ]
+
+    const html = renderToStaticMarkup(<AgentStageStream stages={disordered} />)
+    const readIndex = html.indexOf("读取上下文")
+    const draftIndex = html.indexOf("生成章节草稿")
+    const finalIndex = html.indexOf("最终输出")
+
+    expect(readIndex).toBeGreaterThan(-1)
+    expect(draftIndex).toBeGreaterThan(readIndex)
+    expect(finalIndex).toBeGreaterThan(draftIndex)
+    expect(html).not.toContain("多任务写作循环")
+    expect(html).toContain("(3)")
+  })
 })

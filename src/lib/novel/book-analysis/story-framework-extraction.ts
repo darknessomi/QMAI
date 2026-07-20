@@ -5,6 +5,7 @@ import {
   extractPlotFrameworkLineageFromAnalysis,
 } from "@/lib/novel/dismantling"
 import type { PlotFramework } from "@/lib/novel/plot-framework"
+import { CHAPTER_BODY_EXCERPT_MAX_CHARS } from "@/lib/novel/chapter-excerpts"
 
 export interface BookStoryFrameworkChapter {
   id: string
@@ -148,6 +149,6 @@ function readFrontmatterValue(frontmatter: string, key: string): string {
 
 function trimChapterContentForPrompt(content: string): string {
   const trimmed = content.trim()
-  if (trimmed.length <= 8000) return trimmed
-  return `${trimmed.slice(0, 8000)}\n\n[本章内容过长，已截断用于故事框架提取]`
+  if (trimmed.length <= CHAPTER_BODY_EXCERPT_MAX_CHARS) return trimmed
+  return `${trimmed.slice(0, CHAPTER_BODY_EXCERPT_MAX_CHARS)}\n\n[本章内容过长，已截断用于故事框架提取]`
 }

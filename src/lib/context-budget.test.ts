@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest"
 import {
   computeContextBudget,
   computeNovelContextTokenBudget,
+  computeWritingContextPackTokenBudget,
   contextScaleForLanguage,
+  resolveContextPackTokenBudget,
+  WRITING_OUTPUT_RESERVE_MULTIPLIER,
 } from "./context-budget"
 
 // The base-math tests pin langScale=1 so they stay deterministic
@@ -84,5 +87,93 @@ describe("computeNovelContextTokenBudget", () => {
     const zh = contextScaleForLanguage("zh")
     expect(computeNovelContextTokenBudget(204_800, 32_000, zh)).toBe(14_144)
     expect(computeNovelContextTokenBudget(204_800, 0, zh)).toBe(14_144)
+  })
+})
+
+describe("resolveContextPackTokenBudget", () => {
+  it("always returns a positive finite budget for auto mode", () => {
+    const budget = resolveContextPackTokenBudget({ maxContextSize: 204_800, contextTokenBudget: 0, langScale: 1 })
+    expect(budget).toBe(33_280)
+    expect(Number.isFinite(budget)).toBe(true)
+  })
+
+  it("honors an explicit user budget within the window cap", () => {
+    expect(resolveContextPackTokenBudget({
+      maxContextSize: 204_800,
+      contextTokenBudget: 10_000,
+      langScale: 1,
+    })).toBe(10_000)
+  })
+})
+
+describe("computeWritingContextPackTokenBudget", () => {
+  it("reserves at least maxOutputTokens (as chars) before allocating the pack", () => {
+    const maxContextSize = 204_800
+    const chapterTargetChars = 3_000
+    const langScale = 1
+    const { maxCtx } = computeContextBudget(maxContextSize, langScale)
+    const budget = computeWritingContextPackTokenBudget({
+      maxContextSize,
+      contextTokenBudget: 0,
+      chapterTargetChars,
+      langScale,
+    })
+    const maxOutputTokens = 8_000
+    const targetReserveTokens = Math.ceil((chapterTargetChars * WRITING_OUTPUT_RESERVE_MULTIPLIER) / 1.7)
+    const outputReserveChars = Math.max(targetReserveTokens, maxOutputTokens) * 4
+    const scaffold = Math.max(8_000, Math.floor(maxCtx * 0.08))
+    expect(budget * 4 + outputReserveChars + scaffold).toBeLessThanOrEqual(maxCtx)
+    expect(outputReserveChars).toBeGreaterThanOrEqual(maxOutputTokens * 4)
+  })
+
+  it("shrinks when chapter target grows", () => {
+    const smallTarget = computeWritingContextPackTokenBudget({
+      maxContextSize: 204_800,
+      chapterTargetChars: 3_000,
+      langScale: 1,
+    })
+    const largeTarget = computeWritingContextPackTokenBudget({
+      maxContextSize: 204_800,
+      chapterTargetChars: 6_000,
+      langScale: 1,
+    })
+    expect(largeTarget).toBeLessThanOrEqual(smallTarget)
+  })
+
+  it("grows with a larger window within the general cap", () => {
+    const smallWindow = computeWritingContextPackTokenBudget({
+      maxContextSize: 64_000,
+      chapterTargetChars: 3_000,
+      langScale: 1,
+    })
+    const largeWindow = computeWritingContextPackTokenBudget({
+      maxContextSize: 204_800,
+      chapterTargetChars: 3_000,
+      langScale: 1,
+    })
+    expect(largeWindow).toBeGreaterThanOrEqual(smallWindow)
+  })
+
+  it("never exceeds the general window cap", () => {
+    const budget = computeWritingContextPackTokenBudget({
+      maxContextSize: 204_800,
+      chapterTargetChars: 3_000,
+      langScale: 1,
+    })
+    expect(budget).toBeLessThanOrEqual(computeNovelContextTokenBudget(204_800, 0, 1))
+  })
+
+  it("clamps an explicit user budget to the writing-derived auto budget", () => {
+    const auto = computeWritingContextPackTokenBudget({
+      maxContextSize: 204_800,
+      chapterTargetChars: 3_000,
+      langScale: 1,
+    })
+    expect(computeWritingContextPackTokenBudget({
+      maxContextSize: 204_800,
+      contextTokenBudget: 100_000,
+      chapterTargetChars: 3_000,
+      langScale: 1,
+    })).toBe(auto)
   })
 })

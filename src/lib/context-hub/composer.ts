@@ -1,3 +1,4 @@
+import { resolveContextPackTokenBudget } from "@/lib/context-budget"
 import { contextPackToPrompt, type ContextPack } from "@/lib/novel/context-engine"
 import { estimateContextTokens } from "./token-estimator"
 import type { ContextHubStats } from "./types"
@@ -8,7 +9,10 @@ export interface ComposeContextInput {
   dependencies: Record<string, number>
   referenceContext?: string[]
   confidence?: number
+  /** Explicit token budget; 0 / undefined = window-derived safe cap. */
   tokenBudget?: number
+  /** Model context window in characters (wiki-store `maxContextSize`). */
+  maxContextSize?: number
 }
 export interface ComposedContext {
   stableCore: string
@@ -158,7 +162,10 @@ function fitFragmentsProportionally(fragments: ContextFragment[], tokenBudget: n
 
 export function composeContext(input: ComposeContextInput): ComposedContext {
   const expanded = (input.confidence ?? 0.8) < 0.6
-  const tokenBudget = Math.max(0, input.tokenBudget ?? 16_000)
+  const tokenBudget = resolveContextPackTokenBudget({
+    maxContextSize: input.maxContextSize,
+    contextTokenBudget: input.tokenBudget,
+  })
   const stableBudget = Math.floor(tokenBudget * 0.4)
   const summaryBudget = Math.floor(tokenBudget * 0.15)
   const stableCore = joinSections(fitFragmentsProportionally(stableFragments(input.contextPack), stableBudget))

@@ -41,6 +41,7 @@ import type { ReferenceToken } from "@/lib/reference/types"
 import { runAiChatSession } from "@/lib/agent/ai-chat-session"
 import { runDraftReviewSkill } from "@/lib/agent/skills/draft-review-skill"
 import { useDraftReviewStore } from "@/stores/draft-review-store"
+import { shouldKeepAwakeForWriting, withWritingWakeLock } from "@/lib/writing-wake-lock"
 import { ToolRegistry } from "@/lib/agent/registry"
 import { registerAllBuiltInTools } from "@/lib/agent/tools"
 import {
@@ -56,6 +57,7 @@ import type { PrePluginChainResult } from "@/lib/agent/pipeline"
 import { applyAgentToolActivityEvent, applyAgentToolEvent } from "@/lib/agent/tool-events"
 import { applyAgentActivityEvent, createAgentActivityEvent, settleRunningAgentStages } from "@/lib/agent/activity-trace"
 import { useAgentConfig } from "@/hooks/use-agent-config"
+import { resolveContextPackTokenBudget } from "@/lib/context-budget"
 import { resolveChapterLengthSpec } from "@/lib/novel/deep-chapter-prompts"
 import { executeIngestWrites } from "@/lib/ingest"
 import { routeTask, buildTaskDirective, type TaskRouteResult } from "@/lib/novel/task-router"
@@ -105,6 +107,10 @@ import type { FrameworkBinding, StoryFramework } from "@/lib/novel/story-simulat
 
 import type { AiWorkflowMode } from "@/lib/agent/workflow-mode"
 import { buildPlanExecutePolicyPrompt, WRITING_INTENTS } from "@/lib/agent/plan-execute-policy"
+import {
+  buildOutlineFindProtocol,
+  shouldIncludeOutlineFindProtocol,
+} from "@/lib/novel/outline-find-protocol"
 import { createContextTrace, finishTrace, setContextInfo, type ContextTrace } from "@/lib/agent/context-trace"
 import { settleRunningAgentToolCalls } from "@/lib/agent/tool-events"
 import { appendMcpCallTrace } from "@/lib/agent/mcp-trace"
@@ -286,6 +292,9 @@ function buildChatAgentSystemPrompt(options: {
   agentWritingSkills?: UserSkill[]
   projectName?: string
   bindingTitle?: string
+  targetChapterNumber?: number
+  /** 仅章节写作且不会走 pre-plugin 时注入，避免与 build_system_prompt plugin 重复 */
+  includeOutlineFindProtocol?: boolean
 }): string {
   const lines = [
     options.novelMode
@@ -306,6 +315,9 @@ function buildChatAgentSystemPrompt(options: {
     lines.push("小说模式下，如果用户要求生成、续写或改写章节，只输出可直接放入章节库的正文。")
     lines.push("章节生成、续写或改写任务的最终回复必须只包含章节正文，不要把工具读取过程、写作计划或执行过程展示给用户。")
     lines.push("不要输出读取说明、执行总结、完成目标表格、章节结构、后续建议、引用来源或 Markdown 表格；章节标题和正文以外的内容都不要输出。")
+    if (options.includeOutlineFindProtocol) {
+      lines.push(buildOutlineFindProtocol(options.targetChapterNumber))
+    }
     if (options.aiWorkflowMode === "fast") {
       lines.push("快速模式下可以读取必要上下文；除非用户明确要求使用工作流或 Skill，否则不要主动调用 run_chapter_workflow。")
     } else {
@@ -1099,7 +1111,7 @@ export function ChatPanel() {
         getCopyableAssistantContent(content),
       )
       const selectedChapterNumber = await readSelectedChapterNumberForFile(selectedFile)
-      const generatedTargetChapterNumber = detectGeneratedTargetChapterNumber(cleanedContent)
+      const generatedTargetChapterNumber = detectGeneratedTargetChapterNumber(extractedTitle ?? cleanedContent)
       const explicitTargetPath = generatedTargetChapterNumber ? await findChapterFileByNumber(pp, generatedTargetChapterNumber) : null
       const strategy = decideChapterSaveStrategy({
         selectedChapterNumber: selectedChapterNumber ?? null,
@@ -1128,7 +1140,7 @@ export function ChatPanel() {
           "---",
           "",
         ].join("\n")
-        // 正文内容已经包含标题行，直接拼接即可
+        // 标题只写入 frontmatter，正文只保存实际章节内容，避免重复。
         return `${frontmatter}${bodyContent}\n`
       }
 
@@ -1351,16 +1363,6 @@ export function ChatPanel() {
         return
       }
 
-      const sessionAgentSystemPrompt = buildChatAgentSystemPrompt({
-        novelMode,
-        mode,
-        deepChapterEnabled,
-        chatEditModeEnabled,
-        aiWorkflowMode,
-        planExecuteEnabled: planExecuteActive,
-        projectName: project?.name,
-        bindingTitle: activeBinding?.framework.title,
-      })
       const lastGeneratedChapterNumber = novelMode
         ? detectLastGeneratedChapterNumber(
             activeConvMessages
@@ -1469,6 +1471,22 @@ export function ChatPanel() {
           }
         : taskRoute
 
+      const sessionAgentSystemPrompt = buildChatAgentSystemPrompt({
+        novelMode,
+        mode,
+        deepChapterEnabled,
+        chatEditModeEnabled,
+        aiWorkflowMode,
+        planExecuteEnabled: planExecuteActive,
+        projectName: project?.name,
+        bindingTitle: activeBinding?.framework.title,
+        targetChapterNumber,
+        // pre-plugin 会注入找纲协议；仅在不会跑 pre-plugin 的章节写作路径由这里注入一次
+        includeOutlineFindProtocol:
+          shouldIncludeOutlineFindProtocol(effectiveTaskRoute?.intent) &&
+          !(novelMode && (aiWorkflowMode !== "fast" || planExecuteActive)),
+      })
+
       if (novelMode && effectiveTaskRoute) {
         const contextHub = getContextHub(pp)
         const novelConfig = useWikiStore.getState().novelConfig
@@ -1489,9 +1507,8 @@ export function ChatPanel() {
               content: message.content,
             })),
             existingSummary: activeConv?.contextSummary,
-            tokenBudget: novelConfig.contextTokenBudget > 0
-              ? novelConfig.contextTokenBudget
-              : undefined,
+            tokenBudget: novelConfig.contextTokenBudget,
+            maxContextSize: agentConfig.llmConfig.maxContextSize,
           })
           if (contextHubResult) {
             try {
@@ -1612,7 +1629,10 @@ export function ChatPanel() {
             revisionDirectives: "",
             }))
             const novelConfig = useWikiStore.getState().novelConfig
-            const budget = novelConfig.contextTokenBudget > 0 ? novelConfig.contextTokenBudget : undefined
+            const budget = resolveContextPackTokenBudget({
+              maxContextSize: agentConfig.llmConfig.maxContextSize,
+              contextTokenBudget: novelConfig.contextTokenBudget,
+            })
             novelContextPrompt = [
               taskDirective,
               goldenDirective,
@@ -1697,6 +1717,8 @@ export function ChatPanel() {
           getChatConversations: () => [],
           getOutlineConversations: () => [],
           readTextFile: contextHubResult.readFile,
+          llmConfig: agentConfig.llmConfig,
+          maxContextSize: agentConfig.llmConfig.maxContextSize,
           enabledToolNames: [
             "read_chapter",
             "read_outline",
@@ -1722,7 +1744,12 @@ export function ChatPanel() {
       }
 
       try {
-        const record = await runAiChatSession({
+        const keepAwake = shouldKeepAwakeForWriting({
+          novelMode,
+          intent: effectiveTaskRoute?.intent,
+          planExecuteActive,
+        })
+        const record = await withWritingWakeLock(keepAwake, () => runAiChatSession({
           userMessage: plainText,
           projectPath,
           agentConfig: {
@@ -1781,7 +1808,7 @@ export function ChatPanel() {
               markError(error)
             },
           },
-        })
+        }))
 
         if (controller.signal.aborted) return
         if (!streamSessionGuardRef.current.isActive(capturedConvId, sessionId)) return

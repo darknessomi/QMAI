@@ -9,6 +9,43 @@ import type {
 const EMPTY_CONTENT = "本阶段未返回可展示内容。"
 const AGGREGATE_STAGE_IDS = new Set(["chapter_workflow", "react_tools"])
 
+/** 细粒度章节流水线阶段；存在任一此类阶段时隐藏冗余的 chapter_workflow 聚合阶段。 */
+export const DETAILED_CHAPTER_STAGE_IDS = new Set([
+  "read_context",
+  "plot_analysis",
+  "generate_draft",
+  "validate_revision",
+  "execution_report",
+  "execution_recheck",
+  "plan_compliance",
+  "plan_deviation_repair",
+  "plan_deviation_recheck",
+  "final_output",
+])
+
+export const AGENT_STAGE_DISPLAY_ORDER = [
+  "task_understanding",
+  "capability_selection",
+  "read_context",
+  "plot_analysis",
+  "generate_draft",
+  "validate_revision",
+  "execution_report",
+  "execution_recheck",
+  "plan_compliance",
+  "plan_deviation_repair",
+  "plan_deviation_recheck",
+  "final_output",
+  "external_search",
+  "write_confirmation",
+  "react_tools",
+  "chapter_workflow",
+] as const
+
+const STAGE_DISPLAY_ORDER_INDEX = new Map<string, number>(
+  AGENT_STAGE_DISPLAY_ORDER.map((id, index) => [id, index]),
+)
+
 export interface CreateAgentActivityEventInput {
   id: string
   stageId: string
@@ -87,6 +124,35 @@ export function getDefaultOpenAgentStageId(stages: AgentStageTrace[]): string | 
     ?? findMostRecentStageId(stages, "approval_required")
     ?? findMostRecentStageId(stages, "error")
     ?? null
+}
+
+export function filterAgentStagesForDisplay(stages: AgentStageTrace[]): AgentStageTrace[] {
+  const hasDetailedChapterStage = stages.some((stage) => DETAILED_CHAPTER_STAGE_IDS.has(stage.id))
+  if (!hasDetailedChapterStage) return stages
+  return stages.filter((stage) => stage.id !== "chapter_workflow")
+}
+
+export function sortAgentStagesForDisplay(stages: AgentStageTrace[]): AgentStageTrace[] {
+  const unknownBase = AGENT_STAGE_DISPLAY_ORDER.length
+  return stages
+    .map((stage, originalIndex) => ({ stage, originalIndex }))
+    .sort((a, b) => {
+      const orderA = STAGE_DISPLAY_ORDER_INDEX.get(a.stage.id) ?? unknownBase
+      const orderB = STAGE_DISPLAY_ORDER_INDEX.get(b.stage.id) ?? unknownBase
+      if (orderA !== orderB) return orderA - orderB
+
+      const startedA = a.stage.startedAt ?? Number.MAX_SAFE_INTEGER
+      const startedB = b.stage.startedAt ?? Number.MAX_SAFE_INTEGER
+      if (startedA !== startedB) return startedA - startedB
+
+      return a.originalIndex - b.originalIndex
+    })
+    .map(({ stage }) => stage)
+}
+
+export function prepareAgentStagesForDisplay(stages: AgentStageTrace[] | undefined): AgentStageTrace[] {
+  const visible = filterAgentStagesForDisplay(stages ?? [])
+  return sortAgentStagesForDisplay(visible)
 }
 
 export function settleRunningAgentStages(
@@ -221,7 +287,7 @@ function inferStageIdFromToolName(name: string): string {
   return "react_tools"
 }
 
-function inferStageTitle(event: AgentActivityEvent): string {
+export function resolveAgentStageTitle(stageId: string, fallbackTitle?: string): string {
   const titles: Record<string, string> = {
     task_understanding: "任务理解",
     capability_selection: "能力选择",
@@ -230,12 +296,21 @@ function inferStageTitle(event: AgentActivityEvent): string {
     chapter_workflow: "多任务写作循环",
     generate_draft: "生成章节草稿",
     validate_revision: "校验与修正",
+    execution_report: "执行报告",
+    execution_recheck: "执行复检",
+    plan_compliance: "计划履约",
+    plan_deviation_repair: "计划偏离返修",
+    plan_deviation_recheck: "计划偏离复检",
     final_output: "最终输出",
     external_search: "外部检索",
     write_confirmation: "写入确认",
     react_tools: "工具调用",
   }
-  return titles[event.stageId] ?? event.title
+  return titles[stageId] ?? fallbackTitle ?? stageId
+}
+
+function inferStageTitle(event: AgentActivityEvent): string {
+  return resolveAgentStageTitle(event.stageId, event.title)
 }
 
 function inferActivityKindFromToolName(name: string): AgentActivityKind {

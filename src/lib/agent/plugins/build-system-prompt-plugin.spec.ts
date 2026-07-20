@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { createBuildSystemPromptPlugin } from "./build-system-prompt-plugin"
 import { normalizeUserSkill } from "@/lib/novel/skill-library"
+import { buildOutlineFindProtocol } from "@/lib/novel/outline-find-protocol"
 
 describe("BuildSystemPromptPlugin selected skills", () => {
   it("injects selected skill prompt before final model execution", async () => {
@@ -103,10 +104,82 @@ describe("BuildSystemPromptPlugin selected skills", () => {
     expect(result.finalSystemPrompt).toContain("禁止违背")
     expect(result.finalSystemPrompt).toContain("可自由发挥")
     expect(result.finalSystemPrompt).toContain("planBlueprint")
+    expect(result.finalSystemPrompt).toContain("大纲定位协议")
+    expect(result.finalSystemPrompt).toContain("list_outlines")
+    expect(result.finalSystemPrompt).toContain("按 type 分流")
     expect(result.finalSystemRulesPrompt).toContain("章节主编策划协议")
     expect(result.finalSystemRulesPrompt).not.toContain("context prompt")
     const finalPrompt = result.finalSystemPrompt ?? ""
-    expect(finalPrompt.length).toBeLessThan(3000)
+    expect(finalPrompt.length).toBeLessThan(4500)
+  })
+
+  it("injects outline find protocol for chapter writing even without Plan Execute", async () => {
+    const plugin = createBuildSystemPromptPlugin({
+      baseSystemPrompt: "base prompt",
+      buildTaskDirectiveFn: () => "task directive",
+    })
+
+    const result = await plugin.run({
+      userMessage: "写第167章",
+      projectPath: "/project",
+      agentConfig: {} as any,
+      novelMode: true,
+      aiWorkflowMode: "strict",
+      planExecuteEnabled: false,
+      taskRoute: {
+        intent: "write_chapter",
+        confidence: 0.95,
+        chapterNumber: 167,
+        extractedParams: { chapterNumber: "167" },
+      },
+    })
+
+    expect(result.finalSystemPrompt).toContain("大纲定位协议")
+    expect(result.finalSystemPrompt).toContain("本次写作目标：第 167 章")
+    expect(result.finalSystemPrompt).toContain("overview")
+    expect(result.finalSystemPrompt).not.toContain("章节主编策划协议")
+    const occurrences = (result.finalSystemPrompt?.match(/大纲定位协议/g) ?? []).length
+    expect(occurrences).toBe(1)
+  })
+
+  it("does not inject outline find protocol for non-writing intents", async () => {
+    const plugin = createBuildSystemPromptPlugin({
+      baseSystemPrompt: "base prompt",
+    })
+
+    const result = await plugin.run({
+      userMessage: "陈远现在知道什么",
+      projectPath: "/project",
+      agentConfig: {} as any,
+      novelMode: true,
+      aiWorkflowMode: "strict",
+      taskRoute: { intent: "character_query", confidence: 0.9, extractedParams: {} },
+    })
+
+    expect(result.finalSystemPrompt).not.toContain("大纲定位协议")
+  })
+
+  it("dedupes outline find protocol already present in base system prompt", async () => {
+    const plugin = createBuildSystemPromptPlugin({
+      baseSystemPrompt: ["base", buildOutlineFindProtocol(1), "tail"].join("\n\n"),
+    })
+
+    const result = await plugin.run({
+      userMessage: "写下一章",
+      projectPath: "/project",
+      agentConfig: {} as any,
+      novelMode: true,
+      taskRoute: {
+        intent: "write_chapter",
+        confidence: 0.9,
+        chapterNumber: 167,
+        extractedParams: {},
+      },
+    })
+
+    const occurrences = (result.finalSystemPrompt?.match(/大纲定位协议/g) ?? []).length
+    expect(occurrences).toBe(1)
+    expect(result.finalSystemPrompt).toContain("本次写作目标：第 167 章")
   })
 
   it.each(["fast", "standard", "strict"] as const)(

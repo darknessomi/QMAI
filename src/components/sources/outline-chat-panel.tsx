@@ -1774,7 +1774,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         });
         return { started: false, sent: false };
       }
-      if (!modelSupportsTools(effectiveModelId)) {
+      if (!modelSupportsTools(effectiveModelId, effectiveLlmConfig.provider)) {
         addMessage(convId, {
           id: crypto.randomUUID(),
           role: "assistant",
@@ -1886,9 +1886,8 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           references: tokens.map(describeReferenceForOutlineAgent),
           messages: historyBeforeSend,
           existingSummary: forceRefresh ? undefined : targetConversation?.contextSummary,
-          tokenBudget: novelConfig.contextTokenBudget > 0
-            ? novelConfig.contextTokenBudget
-            : undefined,
+          tokenBudget: novelConfig.contextTokenBudget,
+          maxContextSize: effectiveLlmConfig.maxContextSize,
           forceRefresh,
         });
         if (contextHubResult) {
@@ -2753,9 +2752,8 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
               content: message.content,
             })),
             existingSummary: conv.contextSummary,
-            tokenBudget: novelConfig.contextTokenBudget > 0
-              ? novelConfig.contextTokenBudget
-              : undefined,
+            tokenBudget: novelConfig.contextTokenBudget,
+            maxContextSize: effectiveLlmConfig.maxContextSize,
           });
           if (contextHubResult) {
             try {
@@ -3084,7 +3082,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         });
         return;
       }
-      if (!modelSupportsTools(effectiveModelId)) {
+      if (!modelSupportsTools(effectiveModelId, effectiveLlmConfig.provider)) {
         addMessage(activeConversationId, {
           id: crypto.randomUUID(),
           role: "assistant",
@@ -3140,9 +3138,8 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             intent: "generate",
             messages: historyMessages,
             existingSummary: undefined,
-            tokenBudget: novelConfig.contextTokenBudget > 0
-              ? novelConfig.contextTokenBudget
-              : undefined,
+            tokenBudget: novelConfig.contextTokenBudget,
+            maxContextSize: effectiveLlmConfig.maxContextSize,
           });
           if (contextHubResult && isCurrentRun()) {
             try {

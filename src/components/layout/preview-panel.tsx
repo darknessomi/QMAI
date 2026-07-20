@@ -1245,7 +1245,10 @@ export function PreviewPanel() {
       return
     }
 
-    handleSave(rawBlock + rebuildChapterBody(heading, replaced.body))
+    const replacedMarkdown = rawBlock + rebuildChapterBody(heading, replaced.body)
+    handleSave(selectionTransformAction === "de-ai"
+      ? normalizeChapterWriting(replacedMarkdown)
+      : replacedMarkdown)
     setSelectionTransformOpen(false)
     setSelectionTransformAction(null)
     setSelectionTransformSelection(null)
@@ -1253,7 +1256,7 @@ export function PreviewPanel() {
     setSelectionTransformCandidateContent("")
     setSelectionTransformSkillName("")
     setSaveStatus("")
-  }, [fileContent, handleSave, selectionTransformCandidateContent, selectionTransformSelection])
+  }, [fileContent, handleSave, selectionTransformAction, selectionTransformCandidateContent, selectionTransformSelection])
 
   const handleCloseSelectionTransform = useCallback(() => {
     setSelectionTransformOpen(false)
@@ -1774,6 +1777,7 @@ export function PreviewPanel() {
               try {
                 await applyDeAiBatchChapter(task.chapterPath, task.candidateContent)
                 useDeAiTaskStore.getState().confirmTask(chapterId)
+                useDeAiTaskStore.getState().closeReview(project.path)
                 toast.success(`${task.chapterTitle} 去AI味结果已保存`)
               } catch (err) {
                 console.error("保存去AI味结果失败:", err)

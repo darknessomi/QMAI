@@ -175,6 +175,82 @@ export function computeNovelContextTokenBudget(
   return cap
 }
 
+export interface ResolveContextPackTokenBudgetInput {
+  maxContextSize?: number
+  /** User setting; 0 / undefined = auto from window. */
+  contextTokenBudget?: number
+  langScale?: number
+}
+
+/**
+ * Canonical resolver for chat / context-hub / trim-plugin ContextPack budgets.
+ * Always returns a positive finite token budget (never "unbounded").
+ */
+export function resolveContextPackTokenBudget(
+  input: ResolveContextPackTokenBudgetInput = {},
+): number {
+  return computeNovelContextTokenBudget(
+    input.maxContextSize,
+    input.contextTokenBudget,
+    input.langScale,
+  )
+}
+
+/** Output reserve multiplier: chapter target chars × this factor. */
+export const WRITING_OUTPUT_RESERVE_MULTIPLIER = 2
+/** Minimum scaffold reserve for writing prompts (instructions / outline shell). */
+const WRITING_SCAFFOLD_RESERVE_FLOOR = 8_000
+const WRITING_SCAFFOLD_RESERVE_FRAC = 0.08
+
+export interface ComputeWritingContextPackTokenBudgetInput {
+  maxContextSize?: number
+  contextTokenBudget?: number
+  chapterTargetChars?: number
+  langScale?: number
+}
+
+/**
+ * Deep-chapter ContextPack budget: window minus output reserve (target×2)
+ * and scaffold, then clamped by the general window cap / user budget.
+ */
+export function computeWritingContextPackTokenBudget(
+  input: ComputeWritingContextPackTokenBudgetInput,
+): number {
+  const langScale = input.langScale
+  const { maxCtx } = computeContextBudget(input.maxContextSize, langScale)
+  // Inline clamp mirrors resolveChapterLengthSpec without importing deep-chapter-prompts
+  // (avoids circular deps). Keep in sync with DEEP_CHAPTER 2000–6000 bounds.
+  const rawTarget = input.chapterTargetChars
+  const target = Number.isFinite(rawTarget) && (rawTarget as number) > 0
+    ? Math.max(2_000, Math.min(6_000, Math.round(rawTarget as number)))
+    : 3_000
+  // Same formula as resolveChapterLengthSpec.maxOutputTokens.
+  const maxOutputTokens = target === 3_000
+    ? 8_000
+    : Math.max(8_000, Math.ceil((target + 500) * 2))
+  // User redundancy: 2× target chars at CJK density (~1.7 chars/token), then take the
+  // larger of that vs the chapter maxOutputTokens so generation headroom is real.
+  const targetReserveTokens = Math.ceil(
+    (target * WRITING_OUTPUT_RESERVE_MULTIPLIER) / CHARS_PER_TOKEN_CJK,
+  )
+  const outputReserveTokens = Math.max(targetReserveTokens, maxOutputTokens)
+  const outputReserveChars = outputReserveTokens * CHARS_PER_TOKEN
+  const scaffoldReserveChars = Math.max(
+    WRITING_SCAFFOLD_RESERVE_FLOOR,
+    Math.floor(maxCtx * WRITING_SCAFFOLD_RESERVE_FRAC),
+  )
+  const availableChars = Math.max(0, maxCtx - outputReserveChars - scaffoldReserveChars)
+  // Do not inflate with NOVEL_CONTEXT_TOKEN_FLOOR: that would steal the output reserve
+  // on small windows. Prefer leaving room for chapter generation.
+  const derivedTokens = Math.max(0, Math.floor(availableChars / CHARS_PER_TOKEN))
+  const windowCap = computeNovelContextTokenBudget(input.maxContextSize, 0, langScale)
+  const autoTokens = Math.min(derivedTokens, windowCap)
+  if (input.contextTokenBudget && input.contextTokenBudget > 0) {
+    return Math.min(input.contextTokenBudget, autoTokens)
+  }
+  return autoTokens
+}
+
 /** Legacy single-pass outline ingest floor; kept so small windows still behave predictably. */
 export const OUTLINE_INGEST_MIN_BODY_BUDGET = 8_000
 /** Upper cap aligned with wiki long-source ingest. */

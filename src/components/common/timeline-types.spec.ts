@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
+  compareToolCallsByStartedAt,
   createStreamingEventBuilder,
+  filterToolCallsForDisplay,
   interleaveThinkingWithToolCalls,
   type ToolCallEventItem,
 } from "./timeline-types"
@@ -17,6 +19,63 @@ function createToolCall(
     status,
   }
 }
+
+describe("compareToolCallsByStartedAt", () => {
+  it("sorts missing startedAt after known timestamps and breaks ties by id", () => {
+    const calls = [
+      { id: "b", startedAt: undefined },
+      { id: "a", startedAt: 200 },
+      { id: "c", startedAt: undefined },
+      { id: "d", startedAt: 100 },
+    ]
+
+    expect([...calls].sort(compareToolCallsByStartedAt).map((call) => call.id)).toEqual([
+      "d",
+      "a",
+      "b",
+      "c",
+    ])
+  })
+})
+
+describe("filterToolCallsForDisplay", () => {
+  it("hides parent tools once child steps exist", () => {
+    const calls = [
+      { id: "workflow-1", name: "run_chapter_workflow", startedAt: 100 },
+      {
+        id: "workflow-1:chapter_context",
+        parentCallId: "workflow-1",
+        name: "chapter_context",
+        startedAt: 110,
+      },
+      {
+        id: "workflow-1:chapter_draft",
+        parentCallId: "workflow-1",
+        name: "chapter_draft",
+        startedAt: 200,
+      },
+      { id: "write-1", name: "write_chapter", startedAt: 300 },
+    ]
+
+    expect(filterToolCallsForDisplay(calls).map((call) => call.id)).toEqual([
+      "workflow-1:chapter_context",
+      "workflow-1:chapter_draft",
+      "write-1",
+    ])
+  })
+
+  it("keeps parent tools when they have no children yet", () => {
+    const calls = [
+      { id: "workflow-1", name: "run_chapter_workflow", startedAt: 100 },
+      { id: "read-1", name: "read_chapter", startedAt: 50 },
+    ]
+
+    expect(filterToolCallsForDisplay(calls).map((call) => call.id)).toEqual([
+      "workflow-1",
+      "read-1",
+    ])
+  })
+})
 
 describe("createStreamingEventBuilder", () => {
   it("keeps both tool ids in order while replacing the second running call with done", () => {
