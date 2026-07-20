@@ -11,11 +11,15 @@ import {
 import { Button } from "@/components/ui/button"
 import { exportBackup } from "@/lib/backup/export"
 import { importBackup, readBackupManifest, selectBackupFile } from "@/lib/backup/import"
+import { loadRegistry } from "@/lib/project-identity"
+import { BackupExportDialog } from "./backup-export-dialog"
 import type {
+  BackupExportOptions,
   ExportResult,
   ImportResult,
   ImportStrategy,
   BackupProgressPayload,
+  ProjectBackupInfo,
   ProjectManifestEntry,
   ProjectRestoreInfo,
 } from "@/lib/backup/types"
@@ -29,6 +33,9 @@ export function DataManagementSection() {
   const [importStrategy, setImportStrategy] = useState<ImportStrategy>("full")
   const [progress, setProgress] = useState<BackupProgressPayload | null>(null)
   const [showProjectSelect, setShowProjectSelect] = useState(false)
+  const [showExportSelect, setShowExportSelect] = useState(false)
+  const [isLoadingExportOptions, setIsLoadingExportOptions] = useState(false)
+  const [exportProjects, setExportProjects] = useState<ProjectBackupInfo[]>([])
   const [manifestProjects, setManifestProjects] = useState<ProjectManifestEntry[]>([])
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set())
   const [pendingZipPath, setPendingZipPath] = useState<string>("")
@@ -37,12 +44,37 @@ export function DataManagementSection() {
     setProgress(payload)
   }, [])
 
-  async function handleExport() {
+  async function openExportDialog() {
+    setExportResult(null)
+    setIsLoadingExportOptions(true)
+    try {
+      const registry = await loadRegistry()
+      setExportProjects(Object.values(registry).map((project) => ({
+        id: project.id,
+        name: project.name,
+        path: project.path,
+      })))
+      setShowExportSelect(true)
+    } catch (err) {
+      setExportResult({
+        success: false,
+        warnings: [],
+        fileCount: 0,
+        totalSize: 0,
+        error: `读取项目列表失败：${String(err)}`,
+      })
+    } finally {
+      setIsLoadingExportOptions(false)
+    }
+  }
+
+  async function handleExport(options: BackupExportOptions) {
+    setShowExportSelect(false)
     setIsExporting(true)
     setExportResult(null)
     setProgress(null)
     try {
-      const result = await exportBackup(handleProgress)
+      const result = await exportBackup(options, handleProgress)
       setExportResult(result)
     } catch (err) {
       setExportResult({
@@ -66,8 +98,19 @@ export function DataManagementSection() {
 
       try {
         const manifest = await readBackupManifest(zipPath)
-        setManifestProjects(manifest)
-        setSelectedProjectIds(new Set(manifest.map((p) => p.id)))
+        if (manifest.projects.length === 0) {
+          setImportResult({
+            success: false,
+            appState: null,
+            localStorageData: null,
+            projects: [],
+            warnings: [],
+            error: "该备份不包含可恢复的项目数据",
+          })
+          return
+        }
+        setManifestProjects(manifest.projects)
+        setSelectedProjectIds(new Set(manifest.projects.map((p) => p.id)))
         setPendingZipPath(zipPath)
         setShowProjectSelect(true)
       } catch {
@@ -152,7 +195,7 @@ export function DataManagementSection() {
     setSelectedProjectIds(new Set())
   }
 
-  const isBusy = isExporting || isImporting
+  const isBusy = isExporting || isImporting || isLoadingExportOptions
 
   return (
     <div className="space-y-6">
@@ -204,14 +247,16 @@ export function DataManagementSection() {
         </div>
         <p className="text-sm text-muted-foreground">
           {t("settings.sections.dataManagement.exportDescription", {
-            defaultValue: "将所有数据打包为一个 zip 文件，用于重装系统前备份。包含：全局配置、所有项目数据、UI偏好。",
+            defaultValue: "将选中的内容打包为 ZIP 文件，可选择全局配置、项目和数据类别。",
           })}
         </p>
-        <Button onClick={handleExport} disabled={isBusy}>
-          {isExporting ? (
+        <Button onClick={() => void openExportDialog()} disabled={isBusy}>
+          {isExporting || isLoadingExportOptions ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              {t("settings.sections.dataManagement.exporting", { defaultValue: "导出中..." })}
+              {t("settings.sections.dataManagement.exporting", {
+                defaultValue: isLoadingExportOptions ? "正在读取项目..." : "导出中...",
+              })}
             </>
           ) : (
             <>
@@ -272,7 +317,7 @@ export function DataManagementSection() {
           </label>
           <div className="space-y-1">
             {([
-              { value: "full" as const, label: "完全覆盖（清除当前所有数据）" },
+              { value: "full" as const, label: "恢复备份中包含的全部内容（V1 会覆盖全局配置）" },
               { value: "selective" as const, label: "选择性导入（仅恢复选中的项目）" },
               { value: "global-only" as const, label: "仅导入全局配置（模型、UI偏好）" },
             ]).map((opt) => (
@@ -415,12 +460,20 @@ export function DataManagementSection() {
         </div>
       )}
 
+      <BackupExportDialog
+        open={showExportSelect}
+        projects={exportProjects}
+        exporting={isExporting}
+        onOpenChange={setShowExportSelect}
+        onConfirm={(options) => void handleExport(options)}
+      />
+
       <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-900 dark:bg-yellow-950 dark:text-yellow-200">
         <div className="flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
           <p>
             {t("settings.sections.dataManagement.securityWarning", {
-              defaultValue: "备份文件包含 API 密钥等敏感信息，请妥善保管，不要分享给他人。",
+              defaultValue: "只有勾选 API Key 和其他凭据时，备份才包含敏感信息；包含凭据的 ZIP 未加密，请勿分享。",
             })}
           </p>
         </div>

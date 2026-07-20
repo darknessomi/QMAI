@@ -1027,7 +1027,7 @@
         "title": "Data Management",
         "description": "Backup and restore all your data, including model configs, AI chats, novel content, outlines, memory, book analysis results, etc.",
         "exportTitle": "Export Backup",
-        "exportDescription": "Pack all data into a zip file for backup before reinstalling OS. Includes: global configs, all project data, UI preferences.",
+        "exportDescription": "Pack selected global settings, projects, and data categories into a ZIP backup.",
         "exportButton": "Export Backup",
         "exporting": "Exporting...",
         "exportSuccess": "Export successful",
@@ -1039,7 +1039,7 @@
         "importing": "Importing...",
         "importSuccess": "Import successful. Please restart the app.",
         "restoredProjects": "Restored {{count}} projects",
-        "securityWarning": "Backup files contain sensitive information like API keys. Keep them safe and do not share."
+        "securityWarning": "Credentials are included only when selected. ZIP backups containing credentials are not encrypted and should not be shared."
       },
       "changelog": {
         "title": "Release Notes",

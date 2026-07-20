@@ -11,6 +11,7 @@ import type {
   ImportStrategy,
   ProjectRestoreInfo,
   ProjectManifestEntry,
+  BackupManifestPreview,
   BackupProgressCallback,
 } from "./types"
 
@@ -41,7 +42,8 @@ async function refreshCurrentProjectIfNeeded(restoredProjects: Array<{ path: str
 async function checkAndRemapPaths(zipPath: string): Promise<Record<string, string> | null> {
   let manifest: ProjectManifestEntry[]
   try {
-    manifest = await invoke<ProjectManifestEntry[]>("read_backup_manifest", { zipPath })
+    const preview = await invoke<BackupManifestPreview>("read_backup_manifest", { zipPath })
+    manifest = preview.projects
   } catch {
     // manifest 读取失败，回退到原行为（直接导入）
     return {}
@@ -85,8 +87,8 @@ async function checkAndRemapPaths(zipPath: string): Promise<Record<string, strin
  * 读取备份文件的 manifest，返回项目列表。
  * 供 UI 组件在导入前预览项目列表使用。
  */
-export async function readBackupManifest(zipPath: string): Promise<ProjectManifestEntry[]> {
-  return await invoke<ProjectManifestEntry[]>("read_backup_manifest", { zipPath })
+export async function readBackupManifest(zipPath: string): Promise<BackupManifestPreview> {
+  return await invoke<BackupManifestPreview>("read_backup_manifest", { zipPath })
 }
 
 /**
@@ -122,7 +124,7 @@ export async function importBackup(
   }
 
   // 导入前检查路径可达性，必要时弹窗让用户选择新目录
-  const pathOverrides = await checkAndRemapPaths(zipPath)
+  const pathOverrides = strategy === "global-only" ? {} : await checkAndRemapPaths(zipPath)
   if (pathOverrides === null) {
     return {
       success: false,
@@ -157,15 +159,17 @@ export async function importBackup(
 
     if (result.localStorageData) {
       const prefixes = ["qmai", "lk-"]
-      const keysToRemove: string[] = []
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i)
-        if (key && prefixes.some((p) => key.startsWith(p))) {
-          keysToRemove.push(key)
+      if (result.replaceLocalStorage !== false) {
+        const keysToRemove: string[] = []
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (key && prefixes.some((p) => key.startsWith(p))) {
+            keysToRemove.push(key)
+          }
         }
-      }
-      for (const key of keysToRemove) {
-        localStorage.removeItem(key)
+        for (const key of keysToRemove) {
+          localStorage.removeItem(key)
+        }
       }
       for (const [key, value] of Object.entries(result.localStorageData)) {
         localStorage.setItem(key, value)

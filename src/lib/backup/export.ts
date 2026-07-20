@@ -1,22 +1,23 @@
 import { invoke } from "@tauri-apps/api/core"
 import { save } from "@tauri-apps/plugin-dialog"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { loadRegistry } from "@/lib/project-identity"
 import type {
+  BackupExportOptions,
   ExportParams,
   ExportResult,
-  ProjectBackupInfo,
   BackupProgressCallback,
 } from "./types"
 
 const LS_PREFIXES = ["qmai", "lk-"]
+const SENSITIVE_STORAGE_KEY = /(api[_-]?key|token|secret|password|fingerprint)/i
 
-function collectLocalStorage(): Record<string, string> {
+function collectLocalStorage(includeCredentials: boolean): Record<string, string> {
   const data: Record<string, string> = {}
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
     if (!key) continue
     if (LS_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      if (!includeCredentials && SENSITIVE_STORAGE_KEY.test(key)) continue
       const value = localStorage.getItem(key)
       if (value !== null) {
         data[key] = value
@@ -26,16 +27,8 @@ function collectLocalStorage(): Record<string, string> {
   return data
 }
 
-async function collectProjects(): Promise<ProjectBackupInfo[]> {
-  const registry = await loadRegistry()
-  return Object.values(registry).map((entry) => ({
-    id: entry.id,
-    path: entry.path,
-    name: entry.name,
-  }))
-}
-
 export async function exportBackup(
+  options: BackupExportOptions,
   onProgress?: BackupProgressCallback,
 ): Promise<ExportResult> {
   const now = new Date()
@@ -57,13 +50,17 @@ export async function exportBackup(
     }
   }
 
-  const localStorageData = collectLocalStorage()
-  const projects = await collectProjects()
+  const localStorageData = options.includeUiPreferences
+    ? collectLocalStorage(options.includeCredentials)
+    : {}
 
   const params: ExportParams = {
     savePath,
+    includeGlobalConfig: options.includeGlobalConfig,
+    includeUiPreferences: options.includeUiPreferences,
+    includeCredentials: options.includeCredentials,
     localStorageData,
-    projects,
+    projects: options.projects,
   }
 
   let unlisten: UnlistenFn | undefined

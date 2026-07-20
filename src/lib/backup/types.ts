@@ -5,11 +5,32 @@ export interface ProjectBackupInfo {
   name: string
 }
 
+export type ProjectBackupSection =
+  | "content"
+  | "memory"
+  | "analysis"
+  | "indexes"
+  | "trash"
+
+export interface SelectedProjectBackupInfo extends ProjectBackupInfo {
+  sections: ProjectBackupSection[]
+}
+
+export interface BackupExportOptions {
+  includeGlobalConfig: boolean
+  includeUiPreferences: boolean
+  includeCredentials: boolean
+  projects: SelectedProjectBackupInfo[]
+}
+
 /** 导出参数 */
 export interface ExportParams {
   savePath: string
+  includeGlobalConfig: boolean
+  includeUiPreferences: boolean
+  includeCredentials: boolean
   localStorageData: Record<string, string>
-  projects: ProjectBackupInfo[]
+  projects: SelectedProjectBackupInfo[]
 }
 
 /** 导出结果 */
@@ -55,6 +76,13 @@ export interface ImportResult {
   projects: ProjectRestoreResult[]
   warnings: string[]
   error: string | null
+  replaceLocalStorage?: boolean
+}
+
+export interface BackupContents {
+  globalConfig: boolean
+  uiPreferences: boolean
+  credentials: boolean
 }
 
 /** 备份清单（zip 内 manifest.json） */
@@ -62,7 +90,8 @@ export interface BackupManifest {
   backupVersion: number
   createdAt: string
   appVersion: string
-  projects: ProjectBackupInfo[]
+  contents?: BackupContents
+  projects: Array<ProjectBackupInfo & { sections?: ProjectBackupSection[] }>
 }
 
 /** manifest 项目条目（含路径可达性） */
@@ -71,6 +100,13 @@ export interface ProjectManifestEntry {
   path: string
   name: string
   pathAccessible: boolean
+  sections: ProjectBackupSection[]
+}
+
+export interface BackupManifestPreview {
+  backupVersion: number
+  contents: BackupContents
+  projects: ProjectManifestEntry[]
 }
 
 /** 进度事件载荷 */

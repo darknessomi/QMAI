@@ -836,7 +836,7 @@
         "title": "数据管理",
         "description": "备份和恢复你的所有数据，包括模型配置、AI对话、小说内容、大纲、记忆库、拆书结果等。",
         "exportTitle": "导出备份",
-        "exportDescription": "将所有数据打包为一个 zip 文件，用于重装系统前备份。包含：全局配置、所有项目数据、UI偏好。",
+        "exportDescription": "将选中的内容打包为 ZIP 文件，可选择全局配置、项目和数据类别。",
         "exportButton": "导出备份",
         "exporting": "导出中...",
         "exportSuccess": "导出成功",
@@ -848,7 +848,7 @@
         "importing": "导入中...",
         "importSuccess": "导入成功，请重启软件以使配置生效",
         "restoredProjects": "已恢复 {{count}} 个项目",
-        "securityWarning": "备份文件包含 API 密钥等敏感信息，请妥善保管，不要分享给他人。"
+        "securityWarning": "只有勾选 API Key 和其他凭据时，备份才包含敏感信息；包含凭据的 ZIP 未加密，请勿分享。"
       },
       "changelog": {
         "title": "版本更新",
