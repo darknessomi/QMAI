@@ -1,7 +1,6 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from "react"
-import { X, Check, FileText, Eye, Code } from "lucide-react"
-import ReactMarkdown from "react-markdown"
-import { MonacoDiffEditor } from "./monaco-diff-editor"
+import { useState, useMemo, useCallback, useEffect } from "react"
+import { X, Check, FileText } from "lucide-react"
+import { AiChangeComparePanel } from "./ai-change-compare-panel"
 
 export interface AiChangeReviewItem {
   id: string
@@ -23,8 +22,6 @@ interface AiChangeReviewProps {
   description?: string
 }
 
-type ViewMode = "source" | "preview"
-
 export function AiChangeReview({
   open,
   title,
@@ -35,16 +32,12 @@ export function AiChangeReview({
 }: AiChangeReviewProps) {
   const [items, setItems] = useState<AiChangeReviewItem[]>(initialItems)
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>("source")
   const [saving, setSaving] = useState(false)
-  const originalRef = useRef<HTMLDivElement>(null)
-  const modifiedRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (open) {
       setItems(initialItems)
       setActiveId(initialItems[0]?.id ?? null)
-      setViewMode("source")
       setSaving(false)
     }
   }, [open, initialItems])
@@ -58,23 +51,6 @@ export function AiChangeReview({
     () => items.filter((item) => item.selected).length,
     [items],
   )
-
-  const stats = useMemo(() => {
-    if (!activeItem) return { adds: 0, removes: 0 }
-    const origLines = activeItem.originalContent.split("\n")
-    const modLines = activeItem.modifiedContent.split("\n")
-    const maxLen = Math.max(origLines.length, modLines.length)
-    let adds = 0
-    let removes = 0
-    for (let i = 0; i < maxLen; i++) {
-      const o = origLines[i]
-      const m = modLines[i]
-      if (o === undefined && m !== undefined) adds++
-      else if (o !== undefined && m === undefined) removes++
-      else if (o !== m) { adds++; removes++ }
-    }
-    return { adds, removes }
-  }, [activeItem])
 
   const handleModifiedChange = useCallback(
     (value: string) => {
@@ -101,18 +77,6 @@ export function AiChangeReview({
     onConfirm(items.filter((item) => item.selected))
   }, [items, onConfirm, saving])
 
-  const syncScroll = useCallback(
-    (source: "original" | "modified") => {
-      if (viewMode !== "preview") return
-      const srcEl = source === "original" ? originalRef.current : modifiedRef.current
-      const dstEl = source === "original" ? modifiedRef.current : originalRef.current
-      if (!srcEl || !dstEl) return
-      const ratio = srcEl.scrollTop / (srcEl.scrollHeight - srcEl.clientHeight || 1)
-      dstEl.scrollTop = ratio * (dstEl.scrollHeight - dstEl.clientHeight)
-    },
-    [viewMode],
-  )
-
   if (!open) return null
 
   const isNew = !activeItem?.originalContent.trim()
@@ -132,38 +96,6 @@ export function AiChangeReview({
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {activeItem && (
-              <span className="text-xs text-muted-foreground">
-                <span className="text-green-600 dark:text-green-400">+{stats.adds}</span>
-                {" / "}
-                <span className="text-red-500">-{stats.removes}</span>
-                {" 行"}
-              </span>
-            )}
-            <div className="flex rounded-md border text-xs">
-              <button
-                onClick={() => setViewMode("source")}
-                className={`flex items-center gap-1 px-2 py-1 ${
-                  viewMode === "source"
-                    ? "bg-accent font-medium"
-                    : "hover:bg-accent/50"
-                }`}
-              >
-                <Code className="h-3.5 w-3.5" />
-                源码对比
-              </button>
-              <button
-                onClick={() => setViewMode("preview")}
-                className={`flex items-center gap-1 px-2 py-1 ${
-                  viewMode === "preview"
-                    ? "bg-accent font-medium"
-                    : "hover:bg-accent/50"
-                }`}
-              >
-                <Eye className="h-3.5 w-3.5" />
-                渲染预览
-              </button>
-            </div>
             <button
               onClick={onClose}
               className="rounded-md p-1 hover:bg-accent"
@@ -225,46 +157,12 @@ export function AiChangeReview({
                   )}
                 </div>
 
-                {viewMode === "source" ? (
-                  <div className="flex-1 overflow-hidden">
-                    <MonacoDiffEditor
-                      originalValue={activeItem.originalContent || "（该文件尚不存在）"}
-                      modifiedValue={activeItem.modifiedContent}
-                      onChange={handleModifiedChange}
-                    />
-                  </div>
-                ) : (
-                  <div className="grid flex-1 grid-cols-2 divide-x overflow-hidden">
-                    <div className="flex flex-col overflow-hidden">
-                      <div className="border-b px-3 py-1 text-xs font-medium text-muted-foreground">
-                        原始内容预览
-                      </div>
-                      <div
-                        ref={originalRef}
-                        onScroll={() => syncScroll("original")}
-                        className="flex-1 overflow-auto p-3 prose prose-sm dark:prose-invert max-w-none"
-                      >
-                        {isNew ? (
-                          <span className="text-muted-foreground italic">（该文件尚不存在）</span>
-                        ) : (
-                          <ReactMarkdown>{activeItem.originalContent}</ReactMarkdown>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex flex-col overflow-hidden">
-                      <div className="border-b px-3 py-1 text-xs font-medium text-green-700 dark:text-green-400">
-                        最新内容预览
-                      </div>
-                      <div
-                        ref={modifiedRef}
-                        onScroll={() => syncScroll("modified")}
-                        className="flex-1 overflow-auto p-3 prose prose-sm dark:prose-invert max-w-none"
-                      >
-                        <ReactMarkdown>{activeItem.modifiedContent}</ReactMarkdown>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                <AiChangeComparePanel
+                  originalContent={activeItem.originalContent}
+                  modifiedContent={activeItem.modifiedContent}
+                  onModifiedContentChange={handleModifiedChange}
+                  resetKey={activeItem.id}
+                />
               </>
             ) : (
               <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">

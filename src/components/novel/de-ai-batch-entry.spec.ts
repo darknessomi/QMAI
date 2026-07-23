@@ -14,7 +14,8 @@ describe("de-ai batch entry and settings", () => {
     expect(previewPanel).toContain("runWholeChapterDeAi")
     expect(previewPanel).toContain("registerEditorExternalUpdateHandler")
     expect(previewPanel).toContain("createDeAiBatchChapterApplier")
-    expect(previewPanel).toContain("await applyDeAiBatchChapter(task.chapterPath, task.candidateContent)")
+    expect(previewPanel).toContain("await applyDeAiBatchChapter(task.chapterPath, candidateContent)")
+    expect(previewPanel).toContain("updateTask(chapterId, { candidateContent })")
     expect(previewPanel).toContain("useDeAiTaskStore.getState().closeReview(project.path)")
     expect(previewPanel).toContain("saveDeAiDraftWithoutOverwrite")
     expect(previewPanel).toContain("writeFileIfAbsent")
@@ -25,6 +26,7 @@ describe("de-ai batch entry and settings", () => {
     expect(batchWorkspace).toContain("}, [novelConfig.deAiBatchConcurrency])") // CONCURRENCY_EFFECT_MARKER
     expect(batchWorkspace).toContain("startingRef.current")
     expect(batchWorkspace).toContain("runWorkspaceAction")
+    expect(batchWorkspace).toContain("confirmChapter(taskId, chapterId, candidateContent)")
     expect(batchWorkspace).toContain("createLatestValueSaveQueue")
     expect(batchWorkspace).not.toContain('runWorkspaceAction("config:concurrency"')
     expect(batchWorkspace).toContain("pendingTaskIds.has(reviewTaskId)")

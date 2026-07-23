@@ -64,7 +64,7 @@ export interface DeAiBatchState {
   continueTask(taskId: string): Promise<boolean>
   regenerateChapter(taskId: string, chapterId: string): Promise<boolean>
   cancelChapter(taskId: string, chapterId: string): Promise<boolean>
-  confirmChapter(taskId: string, chapterId: string): Promise<boolean>
+  confirmChapter(taskId: string, chapterId: string, candidateContent?: string): Promise<boolean>
   cancelTask(taskId: string): Promise<boolean>
   openReview(taskId: string, chapterId?: string): void
   closeReview(): void
@@ -347,7 +347,11 @@ export function createDeAiBatchStore(options: CreateDeAiBatchStoreOptions) {
       }
     }
 
-    async function confirmChapter(taskId: string, chapterId: string): Promise<boolean> {
+    async function confirmChapter(
+      taskId: string,
+      chapterId: string,
+      candidateContent?: string,
+    ): Promise<boolean> {
       const token = beginChapterAction(taskId, chapterId)
       if (!token) return false
       try {
@@ -356,11 +360,18 @@ export function createDeAiBatchStore(options: CreateDeAiBatchStoreOptions) {
         const context = captureProjectContext(record.task.projectPath)
         if (!context) return false
         const index = record.chapters.findIndex((item) => item.id === chapterId)
-        const chapter = record.chapters[index]
-        if (!chapter || chapter.status !== "ready" || !chapter.candidateContent) return false
+        let chapter = record.chapters[index]
+        if (!chapter || chapter.status !== "ready") return false
+        const expectedCandidate = candidateContent ?? chapter.candidateContent ?? ""
+        if (!expectedCandidate.trim()) return false
         const expectedGeneration = chapter.generation
-        const expectedCandidate = chapter.candidateContent
         const safeSourcePath = assertChapterSourcePath(record.task.projectPath, chapter.sourcePath)
+        if (candidateContent !== undefined && candidateContent !== chapter.candidateContent) {
+          chapter = { ...chapter, candidateContent, updatedAt: now() }
+          record.chapters[index] = chapter
+          await storage.saveChapter(chapter, record.task.projectPath)
+          if (!isProjectContextCurrent(context)) return false
+        }
         await applyChapter(safeSourcePath, expectedCandidate)
         if (!isProjectContextCurrent(context)) return false
         const latest = record.chapters.find((item) => item.id === chapterId)

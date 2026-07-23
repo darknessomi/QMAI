@@ -8,8 +8,10 @@ export interface DiffLine {
 }
 
 export function computeLineDiff(original: string, modified: string): DiffLine[] {
-  const origLines = original.length === 0 ? [] : original.split("\n")
-  const modLines = modified.length === 0 ? [] : modified.split("\n")
+  const normalizedOriginal = original.replace(/\r\n?/g, "\n")
+  const normalizedModified = modified.replace(/\r\n?/g, "\n")
+  const origLines = normalizedOriginal.length === 0 ? [] : normalizedOriginal.split("\n")
+  const modLines = normalizedModified.length === 0 ? [] : normalizedModified.split("\n")
   const m = origLines.length
   const n = modLines.length
 

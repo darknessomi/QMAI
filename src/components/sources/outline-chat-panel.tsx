@@ -48,6 +48,10 @@ import {
   AgentToolCallMessage,
   type ToolCallRecord,
 } from "@/components/chat/agent-tool-call-message";
+import {
+  OutlineSaveConfirmDialog,
+  type OutlineSaveConfirmPayload,
+} from "@/components/sources/outline-save-confirm-dialog";
 import { OutlineWizardDialog } from "@/components/sources/outline-wizard-dialog";
 import { NovelGenerationRequestMessage } from "@/components/sources/novel-generation-request-message";
 import { OutlineMultiAgentPanel } from "@/components/sources/outline-multi-agent-panel";
@@ -110,8 +114,6 @@ import {
   saveOutlineSaveRequests,
   splitConfirmRequiredSaveRequests,
 } from "@/lib/novel/outline-save-request";
-import { stripOutlineFrontmatter } from "@/lib/novel/outline-markdown";
-import { AiChangeReview, type AiChangeReviewItem } from "@/components/common/ai-change-review";
 import {
   resolveModelConfig,
   resolveNovelModel,
@@ -190,6 +192,7 @@ import { createWriteOutlineNodeTool } from "@/lib/agent/tools/write-outline-node
 import {
   buildIntentAnalysisPrompt,
   parseIntentClarity,
+  shouldAutoFollowUpGeneration,
   stripStructuredMarkers,
   type IntentClarityResult,
 } from "@/lib/novel/outline-intent-clarity";
@@ -473,7 +476,8 @@ function buildGenerationPrompt(
     `请按「AI大纲生成工作流」生成「${title}」。`,
     scope ? `\n## 已确认范围\n${scope}\n` : "",
     "## PRD 3.1 主流程要求",
-    "1. 提取请求关键词。2. 识别用户意图。3. 读取资料。4. 提取关键内容。",
+    "本轮意图分析已经完成，直接使用已确认范围生成完整大纲正文；禁止再次输出 intent_clarity 标记，也不要重新进入意图分析。",
+    "1. 提取请求关键词。2. 使用已确认范围。3. 读取资料。4. 提取关键内容。",
     "5. 结合 skill + soul.md 生成可直接保存的大纲正文。6. 结果强约束收敛。",
     "",
     "## 本分项内容要求",
@@ -1476,7 +1480,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
     mode: "normal" | "character";
     requests: OutlineSaveRequest[];
     characterDrafts: CharacterSaveDraft[];
-    reviewItems?: AiChangeReviewItem[];
   } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -1544,19 +1547,13 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
   }, [isStreaming]);
 
   const executeConfirmedOutlineSave = useCallback(
-    async (reviewItems: AiChangeReviewItem[]) => {
+    async (payload: OutlineSaveConfirmPayload) => {
       if (!project) return;
       const projectPath = normalizePath(project.path);
-      const st = saveConfirmState
-      const confirmRequests = st && st.characterDrafts.length > 0
-        ? characterDraftsToSaveRequests(st.characterDrafts, "保存人物小传")
-        : (st?.requests ?? [])
-          .filter((r) => reviewItems.some((ri) => ri.id === `${r.targetFolder}/${r.fileName}`))
-          .map((r) => {
-            const matched = reviewItems.find((ri) => ri.id === `${r.targetFolder}/${r.fileName}`)
-            return matched ? { ...r, content: matched.modifiedContent } : r
-          });
-      if (confirmRequests.length === 0) {
+      const requests = payload.characterDrafts.length > 0
+        ? characterDraftsToSaveRequests(payload.characterDrafts, "保存人物小传")
+        : payload.requests;
+      if (requests.length === 0) {
         setSaveStatus("没有选择需要保存的内容。");
         return;
       }
@@ -1566,7 +1563,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         const saveResult = await saveOutlineSaveRequests({
           outlineRoot: `${projectPath}/wiki/outlines`,
           confirmed: true,
-          requests: confirmRequests,
+          requests,
           createDirectory,
           fileExists,
           readFile,
@@ -1590,7 +1587,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         setSaveStatus(`保存失败：${error instanceof Error ? error.message : String(error)}`);
       }
     },
-    [project, saveConfirmState],
+    [project],
   );
 
   const handleAutoSaveOutlineRequests = useCallback(
@@ -1682,13 +1679,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
               mode: "character",
               requests: [],
               characterDrafts: extracted.drafts,
-              reviewItems: extracted.drafts.filter((d) => d.selected).map((d) => ({
-                id: `人物小传/${d.fileName}`,
-                fileName: d.fileName,
-                originalContent: "",
-                modifiedContent: d.content,
-                selected: true,
-              })),
             });
             setSaveStatus("检测到人物小传，请确认要保存的人物角色。");
           } else {
@@ -1700,13 +1690,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
               mode: "character",
               requests: [],
               characterDrafts: fallbackDrafts,
-              reviewItems: fallbackDrafts.filter((d) => d.selected).map((d) => ({
-                id: `人物小传/${d.fileName}`,
-                fileName: d.fileName,
-                originalContent: "",
-                modifiedContent: d.content,
-                selected: true,
-              })),
             });
             setSaveStatus(
               `无法自动拆分角色，请在保存前检查文件名和内容。${extracted.errors.join("；")}`,
@@ -2480,7 +2463,10 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             ...message,
             intentClarityResult: intentResult,
           }));
-          if (intentResult.clarity === "clear") {
+          if (
+            intentResult.clarity === "clear" &&
+            shouldAutoFollowUpGeneration(options.intentPhase)
+          ) {
             const capturedStage = outlineWorkflowStages[capturedConvId] ?? "idle";
             if (canTransitionOutlineWorkflow(capturedStage, "sufficiency_check")) {
               setCapturedWorkflowStage("sufficiency_check");
@@ -3436,7 +3422,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
         toast.error("当前没有活跃的对话，无法保存大纲");
         return;
       }
-      const cleanedContent = cleanNextStepArtifacts(content);
+      const stripped = stripStructuredMarkers(content);
+      const bodyContent = extractBodyContent(stripped);
+      const cleanedContent = cleanNextStepArtifacts(bodyContent || stripped);
       if (!cleanedContent.trim()) {
         toast.error("内容为空，无法保存为大纲");
         return;
@@ -3460,13 +3448,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             mode: "character",
             requests: [],
             characterDrafts: extracted.drafts,
-            reviewItems: extracted.drafts.filter((d) => d.selected).map((d) => ({
-              id: `人物小传/${d.fileName}`,
-              fileName: d.fileName,
-              originalContent: "",
-              modifiedContent: d.content,
-              selected: true,
-            })),
           });
           return;
         }
@@ -3516,23 +3497,6 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
             sourceIntent: "手动保存 AI 大纲结果",
             content: mdContent,
           }],
-          reviewItems: (() => {
-            const req = {
-              targetFolder: classification.targetFolder,
-              fileName: classification.fileName,
-              fileType: classification.fileType,
-              writeMode: "create" as const,
-            }
-            return [{
-              id: `${req.targetFolder}/${req.fileName}`,
-              fileName: req.fileName,
-              originalContent: "",
-              modifiedContent: stripOutlineFrontmatter(mdContent),
-              selected: true,
-              targetFolder: req.targetFolder,
-              writeMode: req.writeMode,
-            }]
-          })(),
         });
       } catch (err) {
         setSaveStatus(
@@ -4047,10 +4011,12 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           onConfirm={confirmClearHistory}
         />
         {saveConfirmState ? (
-          <AiChangeReview
+          <OutlineSaveConfirmDialog
             open
             title={saveConfirmState.title}
-            items={saveConfirmState.reviewItems ?? []}
+            mode={saveConfirmState.mode}
+            requests={saveConfirmState.requests}
+            characterDrafts={saveConfirmState.characterDrafts}
             onClose={() => setSaveConfirmState(null)}
             onConfirm={executeConfirmedOutlineSave}
           />

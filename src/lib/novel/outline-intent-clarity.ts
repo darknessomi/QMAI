@@ -18,6 +18,12 @@ export interface IntentClarityResult {
 
 const CLARITY_PATTERN = /<!--\s*intent_clarity\s*-->([\s\S]*?)<!--\s*\/intent_clarity\s*-->/i
 
+export function shouldAutoFollowUpGeneration(
+  intentPhase: "intent_analysis" | "generation" | "waiting_user_input" | undefined,
+): boolean {
+  return intentPhase === "intent_analysis"
+}
+
 export function parseIntentClarity(text: string): IntentClarityResult | null {
   const match = text.match(CLARITY_PATTERN)
   if (!match) return null

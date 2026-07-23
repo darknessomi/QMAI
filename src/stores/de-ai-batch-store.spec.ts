@@ -260,6 +260,41 @@ describe("de-ai batch store", () => {
     expect(storage.saveChapter).toHaveBeenCalledWith(expect.objectContaining({ id: "chapter-1", status: "confirmed" }), "C:/project")
   })
 
+  it("confirms and persists the user-edited candidate content", async () => {
+    const restored = toRecord(input("a"))
+    restored.task.status = "reviewing"
+    restored.chapters[0] = {
+      ...restored.chapters[0],
+      status: "ready",
+      candidateContent: "model candidate",
+    }
+    const { store, applyChapter, storage } = setup({ loaded: [restored] })
+    await store.getState().initializeProject("C:/project")
+
+    expect(await store.getState().confirmChapter(
+      restored.task.id,
+      "chapter-1",
+      "user-edited candidate",
+    )).toBe(true)
+
+    expect(applyChapter).toHaveBeenCalledWith(
+      "C:/project/wiki/chapters/a/chapter-1.md",
+      "user-edited candidate",
+    )
+    expect(store.getState().records[0].chapters[0]).toMatchObject({
+      status: "confirmed",
+      candidateContent: "user-edited candidate",
+    })
+    expect(storage.saveChapter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "chapter-1",
+        status: "confirmed",
+        candidateContent: "user-edited candidate",
+      }),
+      "C:/project",
+    )
+  })
+
   it("取消批次只停止该作品，其他作品继续", async () => {
     const { store } = setup()
     await store.getState().initializeProject("C:/project")

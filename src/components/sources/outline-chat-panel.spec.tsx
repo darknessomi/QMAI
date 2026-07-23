@@ -578,6 +578,8 @@ describe("OutlineChatPanel controls", () => {
     expect(source).toContain("## AI大纲生成工作流")
     expect(source).toContain("提取请求关键词")
     expect(source).toContain("识别用户意图")
+    expect(source).toContain("本轮意图分析已经完成")
+    expect(source).toContain("禁止再次输出 intent_clarity")
     expect(source).toContain("提取对小说创作有用的关键内容")
     expect(source).toContain("结合用户要用的 skill + soul.md 约束")
     expect(source).toContain("最终回复只输出大纲标题和大纲正文")
@@ -695,14 +697,18 @@ describe("OutlineChatPanel controls", () => {
     expect(source).toContain("repairPrompt")
   })
 
-  it("uses save confirm dialog for classified outline saves", () => {
-    expect(source).toContain("AiChangeReview")
-    expect(source).toContain("AiChangeReviewItem")
+  it("uses folder save confirm dialog for classified outline saves", () => {
+    expect(source).toContain("OutlineSaveConfirmDialog")
+    expect(source).toContain("OutlineSaveConfirmPayload")
     expect(source).toContain("extractCharacterSaveDrafts")
     expect(source).toContain("classifyOutlineSaveTarget")
     expect(source).toContain("characterDraftsToSaveRequests")
     expect(source).toContain("splitConfirmRequiredSaveRequests")
-    expect(source).toContain("reviewItems")
+    expect(source).toContain("mode={saveConfirmState.mode}")
+    expect(source).toContain("requests={saveConfirmState.requests}")
+    expect(source).toContain("characterDrafts={saveConfirmState.characterDrafts}")
+    expect(source).not.toContain("<AiChangeReview")
+    expect(source).not.toContain("reviewItems")
     expect(source).toContain("confirmed: true")
   })
 

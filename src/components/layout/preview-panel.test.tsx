@@ -31,6 +31,8 @@ describe("preview-panel final chapter save state", () => {
     expect(source).toContain("TextTransformPreviewDialog")
     expect(source).toContain("handleSelectionAction")
     expect(source).toContain("replaceChapterBodySelection")
+    expect(source).toContain('comparisonMode={selectionTransformAction === "de-ai"}')
+    expect(source).toContain('onCandidateContentChange={selectionTransformAction === "de-ai" ? setSelectionTransformCandidateContent : undefined}')
   })
 
   it("shows the actual skill used by de-AI actions", () => {

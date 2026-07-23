@@ -1771,11 +1771,12 @@ export function PreviewPanel() {
              currentChapterId={currentReviewChapterId}
              pending={deAiDraftSaving}
             onSelectChapter={(id) => useDeAiTaskStore.getState().setReviewChapter(project.path, id)}
-             onConfirm={async (_taskId, chapterId) => {
+             onConfirm={async (_taskId, chapterId, candidateContent) => {
               const task = readyTasks.find((t) => t.id === chapterId)
               if (!task) return
               try {
-                await applyDeAiBatchChapter(task.chapterPath, task.candidateContent)
+                await applyDeAiBatchChapter(task.chapterPath, candidateContent)
+                useDeAiTaskStore.getState().updateTask(chapterId, { candidateContent })
                 useDeAiTaskStore.getState().confirmTask(chapterId)
                 useDeAiTaskStore.getState().closeReview(project.path)
                 toast.success(`${task.chapterTitle} 去AI味结果已保存`)
@@ -1784,10 +1785,10 @@ export function PreviewPanel() {
                 toast.error(`保存失败：${err instanceof Error ? err.message : String(err)}`)
                }
              }}
-             onSaveDraft={async (_taskId, chapterId) => {
+             onSaveDraft={async (_taskId, chapterId, candidateContent) => {
                const task = readyTasks.find((item) => item.id === chapterId)
                if (!task) return
-               await handleDeAiSaveDraft(task.chapterPath, task.candidateContent)
+               await handleDeAiSaveDraft(task.chapterPath, candidateContent)
              }}
              onRegenerate={async (_taskId, chapterId) => {
               const task = readyTasks.find((t) => t.id === chapterId)
@@ -1839,6 +1840,8 @@ export function PreviewPanel() {
         candidateLabel={selectionTransformAction === "polish" ? "润色结果" : "去AI味结果"}
         sourceContent={selectionTransformSourceContent}
         candidateContent={selectionTransformCandidateContent}
+        comparisonMode={selectionTransformAction === "de-ai"}
+        onCandidateContentChange={selectionTransformAction === "de-ai" ? setSelectionTransformCandidateContent : undefined}
         applyLabel="替换选中文本"
         onApply={handleApplySelectionTransform}
         onClose={handleCloseSelectionTransform}

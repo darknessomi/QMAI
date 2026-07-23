@@ -196,7 +196,7 @@ export function DeAiBatchWorkspace() {
         currentChapterId={reviewChapterId}
         pending={reviewPending}
         onSelectChapter={(chapterId) => useDeAiBatchStore.getState().setReviewChapter(chapterId)}
-        onConfirm={(taskId, chapterId) => runWorkspaceAction(`chapter:${taskId}:${chapterId}`, "确认当前章节", () => useDeAiBatchStore.getState().confirmChapter(taskId, chapterId))}
+        onConfirm={(taskId, chapterId, candidateContent) => runWorkspaceAction(`chapter:${taskId}:${chapterId}`, "确认当前章节", () => useDeAiBatchStore.getState().confirmChapter(taskId, chapterId, candidateContent))}
         onRegenerate={(taskId, chapterId) => runWorkspaceAction(`chapter:${taskId}:${chapterId}`, "重新生成当前章节", () => useDeAiBatchStore.getState().regenerateChapter(taskId, chapterId))}
         onCancelChapter={(taskId, chapterId) => runWorkspaceAction(`chapter:${taskId}:${chapterId}`, "取消当前章节", () => useDeAiBatchStore.getState().cancelChapter(taskId, chapterId))}
         onClose={() => useDeAiBatchStore.getState().closeReview()}

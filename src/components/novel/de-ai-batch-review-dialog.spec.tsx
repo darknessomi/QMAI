@@ -127,10 +127,13 @@ describe("DeAiBatchReviewDialog", () => {
     render()
 
     expect(document.body.textContent).toContain("第一章原文")
-    expect(document.body.textContent).toContain("第一章候选")
+    expect(document.body.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${"\u6700\u65b0\u6e90\u7801"}"]`)?.value).toBe("\u7b2c\u4e00\u7ae0\u5019\u9009")
     const desktop = document.body.querySelector('[data-testid="de-ai-review-desktop"]')
     expect(desktop?.className).toContain("md:flex")
-    expect(desktop?.querySelectorAll('[data-testid="de-ai-review-scroll"]')).toHaveLength(3)
+    expect(desktop?.querySelectorAll('[data-testid="de-ai-review-scroll"]')).toHaveLength(1)
+    expect(document.body.textContent).toContain("\u6e90\u7801\u5bf9\u6bd4")
+    expect(document.body.textContent).toContain("\u6e32\u67d3\u9884\u89c8")
+    expect(document.body.querySelector('textarea[aria-label="\u6700\u65b0\u6e90\u7801"]')).not.toBeNull()
   })
 
   it("弹窗受视口约束且头部、正文、底部不越界", () => {
@@ -163,7 +166,7 @@ describe("DeAiBatchReviewDialog", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true)
     act(() => button("取消当前章").click())
 
-    expect(props.onConfirm).toHaveBeenCalledWith("task-a", "chapter-1")
+    expect(props.onConfirm).toHaveBeenCalledWith("task-a", "chapter-1", "\u7b2c\u4e00\u7ae0\u5019\u9009")
     expect(props.onRegenerate).toHaveBeenCalledWith("task-a", "chapter-1")
     expect(window.confirm).toHaveBeenCalledWith("确定取消“第一章”的本次处理吗？原文不会被修改。")
     expect(props.onCancelChapter).toHaveBeenCalledWith("task-a", "chapter-1")
@@ -174,13 +177,34 @@ describe("DeAiBatchReviewDialog", () => {
 
     act(() => button("另存草稿").click())
 
-    expect(props.onSaveDraft).toHaveBeenCalledWith("task-a", "chapter-1")
+    expect(props.onSaveDraft).toHaveBeenCalledWith("task-a", "chapter-1", "\u7b2c\u4e00\u7ae0\u5019\u9009")
+  })
+
+  it("passes the edited candidate to confirm and keeps it while switching chapters", () => {
+    const props = callbacks()
+    const source = record()
+    render("chapter-1", props, source)
+    const editor = document.body.querySelector<HTMLTextAreaElement>('textarea[aria-label="\u6700\u65b0\u6e90\u7801"]')
+    expect(editor).not.toBeNull()
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+      setter?.call(editor, "user-edited candidate")
+      editor!.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    act(() => button("\u786e\u8ba4\u5f53\u524d\u7ae0").click())
+    expect(props.onConfirm).toHaveBeenCalledWith("task-a", "chapter-1", "user-edited candidate")
+
+    render("chapter-2", props, source)
+    render("chapter-1", props, source)
+    expect(document.body.querySelector<HTMLTextAreaElement>('textarea[aria-label="\u6700\u65b0\u6e90\u7801"]')?.value)
+      .toBe("user-edited candidate")
   })
 
   it("生成中保留旧候选并禁用确认和重复重新生成", () => {
     render("chapter-2")
 
-    expect(document.body.textContent).toContain("第二章旧候选")
+    expect(document.body.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${"\u6700\u65b0\u6e90\u7801"}"]`)?.value).toBe("\u7b2c\u4e8c\u7ae0\u65e7\u5019\u9009")
+    expect(document.body.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${"\u6700\u65b0\u6e90\u7801"}"]`)?.readOnly).toBe(true)
     expect(document.body.textContent).toContain("生成中")
     expect(button("确认当前章").disabled).toBe(true)
     expect(button("重新生成").disabled).toBe(true)
@@ -195,22 +219,14 @@ describe("DeAiBatchReviewDialog", () => {
     expect(props.onCancelChapter).not.toHaveBeenCalled()
   })
 
-  it("移动端 tabs 具备完整 ARIA 关联、roving tabindex 与左右键切换", () => {
+  it("mobile review keeps chapter selection and shared source/preview controls", () => {
     render()
-    const tabs = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
-    const panels = Array.from(document.body.querySelectorAll<HTMLElement>('[role="tabpanel"]'))
-    expect(tabs).toHaveLength(2)
-    expect(panels).toHaveLength(1)
-    expect(tabs[0]).toMatchObject({ tabIndex: 0 })
-    expect(tabs[1]).toMatchObject({ tabIndex: -1 })
-    expect(tabs[0].getAttribute("aria-controls")).toBe(panels[0].id)
-    expect(panels[0].getAttribute("aria-labelledby")).toBe(tabs[0].id)
-    act(() => tabs[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })))
-    expect(tabs[1].getAttribute("aria-selected")).toBe("true")
-    expect(document.activeElement).toBe(tabs[1])
-    expect(panels[0].getAttribute("aria-labelledby")).toBe(tabs[1].id)
-    act(() => tabs[1].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })))
-    expect(tabs[0].getAttribute("aria-selected")).toBe("true")
+    const mobile = document.body.querySelector('[data-testid="de-ai-review-mobile"]')
+    expect(mobile?.querySelector('[aria-label="\u9009\u62e9\u5ba1\u6838\u7ae0\u8282"]')).not.toBeNull()
+    expect(button("\u6e90\u7801\u5bf9\u6bd4")).toBeTruthy()
+    act(() => button("\u6e32\u67d3\u9884\u89c8").click())
+    expect(document.body.textContent).toContain("\u539f\u6587\u9884\u89c8")
+    expect(document.body.textContent).toContain("\u5019\u9009\u9884\u89c8")
   })
 
   it("极小高度可滚动到操作区且 pending 时禁用章节操作", () => {

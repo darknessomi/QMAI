@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest"
-import { parseIntentClarity, stripStructuredMarkers } from "./outline-intent-clarity"
+import {
+  parseIntentClarity,
+  shouldAutoFollowUpGeneration,
+  stripStructuredMarkers,
+} from "./outline-intent-clarity"
 
 describe("parseIntentClarity", () => {
   it("解析 clear 意图", () => {
@@ -34,6 +38,15 @@ describe("parseIntentClarity", () => {
 {invalid json}
 <!-- /intent_clarity -->`
     expect(parseIntentClarity(text)).toBeNull()
+  })
+})
+
+describe("shouldAutoFollowUpGeneration", () => {
+  it("只允许意图分析阶段自动进入一次生成，阻止生成和修订阶段再次触发", () => {
+    expect(shouldAutoFollowUpGeneration("intent_analysis")).toBe(true)
+    expect(shouldAutoFollowUpGeneration("generation")).toBe(false)
+    expect(shouldAutoFollowUpGeneration("waiting_user_input")).toBe(false)
+    expect(shouldAutoFollowUpGeneration(undefined)).toBe(false)
   })
 })
 
